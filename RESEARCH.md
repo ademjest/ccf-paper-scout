@@ -35,11 +35,23 @@
 
 ### 其他相关工具
 
+- DelinQu/zotero-arxiv-feishu-llm：https://github.com/DelinQu/zotero-arxiv-feishu-llm
+  - Zotero Web API + 当日 arXiv + OpenAI-compatible embedding/LLM，支持飞书和企业微信通知；适合复用中文消息卡片与反馈按钮，但仍缺 venue 质量门。
+- Marverlises/Paper-Agent-Zotero：https://github.com/Marverlises/Paper-Agent-Zotero
+  - 支持 Zotero 或本地 PDF 语料，包含 PDF 下载、版面/图片分析和 LLM 总结；能力丰富但依赖和资源显著更重。
+- tianbaiting/bib-arxiv-daily：https://github.com/tianbaiting/bib-arxiv-daily
+  - 通过 Zotero 导出的 BibTeX 建模，使用本地 BGE-small 和 GitHub Actions；不需付费 LLM，但兴趣库不能自动同步，且要防止公开仓库泄露个人书目。
+- yuandong-tian/arXiv_recbot：https://github.com/yuandong-tian/arXiv_recbot
+  - 没有 Zotero 接入，但 Telegram 点赞/点踩/评论和累积反馈后训练个人偏好模型的闭环非常值得借鉴。
+- karpathy/arxiv-sanity-lite：https://github.com/karpathy/arxiv-sanity-lite
+  - 经典 TF-IDF/个人库推荐参考，但维护已停滞，部署比每日脚本重。
 - yilewang/llm-for-zotero：https://github.com/yilewang/llm-for-zotero
   - 更偏“基于个人 Zotero 的研究 Agent”，适合借鉴库内检索与问答，而不是高质量新论文资格审核。
 - MuiseDestiny/zotero-gpt：https://github.com/MuiseDestiny/zotero-gpt
   - Zotero 内 LLM 交互插件，可借鉴 UI/插件集成；不是候选数据源。
 - Zotero RSS / Saved Search / Better BibTeX：可作为本地工作流入口，但不解决 venue 质量问题。
+
+综合 GitHub 调研，尚未发现一个成熟项目可以开箱即用地同时满足：Zotero 自动兴趣建模、多源最新召回、CCF-A/venue 可靠识别、质量排序和显式反馈学习。
 
 ## 3. 数据源比较
 
