@@ -35,18 +35,24 @@ def load_json(path: Path, default: Any = None) -> Any:
         return json.load(f)
 
 
-def request_json(url: str, user_agent: str, timeout: int = 30) -> dict[str, Any]:
-    req = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
+def open_json(req: str | urllib.request.Request, timeout: int = 30, attempts: int = 3) -> Any:
+    """Open JSON with bounded retries for transient DNS/network failures."""
     last: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(attempts):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.load(response)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             last = exc
-            if attempt < 2:
+            if attempt < attempts - 1:
                 time.sleep(2 ** attempt)
-    raise RuntimeError(f"request failed after retries: {url}: {last}")
+    target = req.full_url if isinstance(req, urllib.request.Request) else req
+    raise RuntimeError(f"request failed after {attempts} attempts: {target}: {last}")
+
+
+def request_json(url: str, user_agent: str, timeout: int = 30) -> dict[str, Any]:
+    req = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
+    return open_json(req, timeout=timeout)
 
 
 def clean_text(value: Any) -> str:
@@ -84,8 +90,7 @@ def fetch_zotero(config: dict[str, Any], user_agent: str) -> list[dict[str, str]
         while len(papers) < cap:
             url = initial + "&" + urllib.parse.urlencode({"start": start})
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as response:
-                batch = json.load(response)
+            batch = open_json(req, timeout=30)
             if not batch:
                 break
             for item in batch:

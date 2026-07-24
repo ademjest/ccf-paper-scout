@@ -1,6 +1,10 @@
 import importlib.util
+import json
+import os
 import pathlib
 import unittest
+import urllib.error
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("paper_scout", ROOT / "paper_scout.py")
@@ -26,6 +30,20 @@ class ScoutTests(unittest.TestCase):
     def test_openalex_abstract_reconstructs_order(self):
         abstract = scout.openalex_abstract({"world": [1], "hello": [0]})
         self.assertEqual(abstract, "hello world")
+
+    def test_fetch_zotero_retries_temporary_dns_failure(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        response.read.return_value = json.dumps([]).encode()
+        response.status = 200
+        response.headers = {}
+        failure = urllib.error.URLError(OSError(-3, "Temporary failure in name resolution"))
+        with mock.patch.dict(os.environ, {"ZOTERO_USER_ID": "123", "ZOTERO_API_KEY": "secret"}), \
+             mock.patch.object(scout.urllib.request, "urlopen", side_effect=[failure, response]) as urlopen, \
+             mock.patch.object(scout.time, "sleep"):
+            self.assertEqual(scout.fetch_zotero({}, "test-agent"), [])
+        self.assertEqual(urlopen.call_count, 2)
 
     def test_render_contains_quality_statement(self):
         text = scout.render_report([], 3, 0)

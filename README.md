@@ -43,6 +43,17 @@ python3 paper_scout.py --config config.json --output recommendations.md
 - `zotero_collection_keys`：可选；只读取这些 Zotero collection key。
 - `seen_db`：已推荐记录，防止重复推送。加 `--no-update-seen` 可试跑而不更新。
 
+## 网络错误排查
+
+若出现 `Temporary failure in name resolution`，这是 WSL 当时未能解析 Zotero/DBLP/OpenAlex 域名，而不是 API Key 错误。程序会自动重试 3 次。先运行：
+
+```bash
+getent hosts api.zotero.org
+curl -I --connect-timeout 10 https://api.zotero.org/
+```
+
+两条命令均成功后重新执行程序即可。如果在 WSL 中反复出现且 `getent` 失败，可在 Windows PowerShell 执行 `wsl --shutdown` 后重新打开 WSL；长期故障再检查 VPN/代理、防火墙和 WSL DNS 配置。不要把 API Key 粘贴到诊断输出中。
+
 ## 定时运行
 
 Linux/WSL cron 示例（每天 08:00）：
