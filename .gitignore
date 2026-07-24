@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+config.json
+state/
+recommendations*.md
+*.log
