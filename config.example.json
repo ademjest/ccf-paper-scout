@@ -1,0 +1,13 @@
+{
+  "years": [2026, 2025],
+  "venue_keys": ["nips", "icml", "cvpr", "iccv", "aaai", "ijcai", "acl", "sigir", "kdd"],
+  "per_venue": 30,
+  "max_results": 20,
+  "min_score": 0.01,
+  "openalex_enrich_limit": 20,
+  "recent_interest_items": 200,
+  "zotero_collection_keys": [],
+  "seen_db": "state/seen.json",
+  "request_delay_seconds": 1.0,
+  "user_agent": "ccf-paper-scout/0.1 (personal research recommender)"
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Attention Is All You Need",
+    "abstract": "A sequence transduction architecture based entirely on attention, dispensing with recurrence and convolutions."
+  },
+  {
+    "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+    "abstract": "Combining parametric language models with non-parametric dense retrieval for factual and knowledge-intensive generation."
+  },
+  {
+    "title": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+    "abstract": "A stable and lightweight method for aligning language models from human preferences without explicit reward modeling."
+  }
+]

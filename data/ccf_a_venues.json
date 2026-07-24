@@ -1,0 +1,735 @@
+{
+  "source": "https://github.com/WenyanLiu/CCFrank4dblp",
+  "source_updated": "2026-04-06",
+  "note": "Derived CCF venue metadata; verify against the official current CCF catalog.",
+  "venues": [
+    {
+      "id": "/journals/tocs/tocs",
+      "type": "journal",
+      "dblp_key": "tocs",
+      "abbr": "TOCS",
+      "name": "ACM Transactions on Computer Systems",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tos/tos",
+      "type": "journal",
+      "dblp_key": "tos",
+      "abbr": "TOS",
+      "name": "ACM Transactions on Storage",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tcad/tcad",
+      "type": "journal",
+      "dblp_key": "tcad",
+      "abbr": "TCAD",
+      "name": "IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tc/tc",
+      "type": "journal",
+      "dblp_key": "tc",
+      "abbr": "TC",
+      "name": "IEEE Transactions on Computers",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tpds/tpds",
+      "type": "journal",
+      "dblp_key": "tpds",
+      "abbr": "TPDS",
+      "name": "IEEE Transactions on Parallel and Distributed Systems",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/taco/taco",
+      "type": "journal",
+      "dblp_key": "taco",
+      "abbr": "TACO",
+      "name": "ACM Transactions on Architecture and Code Optimization",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/ppopp/ppopp",
+      "type": "conference",
+      "dblp_key": "ppopp",
+      "abbr": "PPoPP",
+      "name": "ACM SIGPLAN Symposium on Principles & Practice of Parallel Programming",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/fast/fast",
+      "type": "conference",
+      "dblp_key": "fast",
+      "abbr": "FAST",
+      "name": "USENIX Conference on File and Storage Technologies",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/dac/dac",
+      "type": "conference",
+      "dblp_key": "dac",
+      "abbr": "DAC",
+      "name": "Design Automation Conference",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/hpca/hpca",
+      "type": "conference",
+      "dblp_key": "hpca",
+      "abbr": "HPCA",
+      "name": "IEEE International Symposium on High Performance Computer Architecture",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/micro/micro",
+      "type": "conference",
+      "dblp_key": "micro",
+      "abbr": "MICRO",
+      "name": "IEEE/ACM International Symposium on Microarchitecture",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/sc/sc",
+      "type": "conference",
+      "dblp_key": "sc",
+      "abbr": "SC",
+      "name": "International Conference for High Performance Computing, Networking, Storage, and Analysis",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/asplos/asplos",
+      "type": "conference",
+      "dblp_key": "asplos",
+      "abbr": "ASPLOS",
+      "name": "International Conference on Architectural Support for Programming Languages and Operating Systems",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/isca/isca",
+      "type": "conference",
+      "dblp_key": "isca",
+      "abbr": "ISCA",
+      "name": "International Symposium on Computer Architecture",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/usenix/usenix",
+      "type": "conference",
+      "dblp_key": "usenix",
+      "abbr": "ACM SIGOPS ATC",
+      "name": "ACM SIGOPS Annual Technical Conference",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/eurosys/eurosys",
+      "type": "conference",
+      "dblp_key": "eurosys",
+      "abbr": "EuroSys",
+      "name": "European Conference on Computer Systems",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/hpdc/hpdc",
+      "type": "conference",
+      "dblp_key": "hpdc",
+      "abbr": "HPDC",
+      "name": "The International ACM Symposium on High-Performance Parallel and Distributed Computing",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/jsac/jsac",
+      "type": "journal",
+      "dblp_key": "jsac",
+      "abbr": "JSAC",
+      "name": "IEEE Journal on Selected Areas in Communications",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tmc/tmc",
+      "type": "journal",
+      "dblp_key": "tmc",
+      "abbr": "TMC",
+      "name": "IEEE Transactions on Mobile Computing",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/ton/ton",
+      "type": "journal",
+      "dblp_key": "ton",
+      "abbr": "TON",
+      "name": "IEEE Transactions on Networking",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/sigcomm/sigcomm",
+      "type": "conference",
+      "dblp_key": "sigcomm",
+      "abbr": "SIGCOMM",
+      "name": "ACM International Conference on Applications, Technologies, Architectures, and Protocols for Computer Communication",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/mobicom/mobicom",
+      "type": "conference",
+      "dblp_key": "mobicom",
+      "abbr": "MobiCom",
+      "name": "ACM International Conference on Mobile Computing and Networking",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/infocom/infocom",
+      "type": "conference",
+      "dblp_key": "infocom",
+      "abbr": "INFOCOM",
+      "name": "IEEE International Conference on Computer Communications",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/nsdi/nsdi",
+      "type": "conference",
+      "dblp_key": "nsdi",
+      "abbr": "NSDI",
+      "name": "Symposium on Network System Design and Implementation",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tdsc/tdsc",
+      "type": "journal",
+      "dblp_key": "tdsc",
+      "abbr": "TDSC",
+      "name": "IEEE Transactions on Dependable and Secure Computing",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tifs/tifs",
+      "type": "journal",
+      "dblp_key": "tifs",
+      "abbr": "TIFS",
+      "name": "IEEE Transactions on Information Forensics and Security",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/joc/joc",
+      "type": "journal",
+      "dblp_key": "joc",
+      "abbr": "",
+      "name": "Journal of Cryptology",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/ccs/ccs",
+      "type": "conference",
+      "dblp_key": "ccs",
+      "abbr": "CCS",
+      "name": "ACM Conference on Computer and Communications Security",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/eurocrypt/eurocrypt",
+      "type": "conference",
+      "dblp_key": "eurocrypt",
+      "abbr": "EUROCRYPT",
+      "name": "International Conference on the Theory and Applications of Cryptographic Techniques",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/sp/sp",
+      "type": "conference",
+      "dblp_key": "sp",
+      "abbr": "S&P",
+      "name": "IEEE Symposium on Security and Privacy",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/crypto/crypto",
+      "type": "conference",
+      "dblp_key": "crypto",
+      "abbr": "CRYPTO",
+      "name": "International Cryptology Conference",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/uss/uss",
+      "type": "conference",
+      "dblp_key": "uss",
+      "abbr": "USENIX Security",
+      "name": "USENIX Security Symposium",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/ndss/ndss",
+      "type": "conference",
+      "dblp_key": "ndss",
+      "abbr": "NDSS",
+      "name": "Network and Distributed System Security Symposium",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/toplas/toplas",
+      "type": "journal",
+      "dblp_key": "toplas",
+      "abbr": "TOPLAS",
+      "name": "ACM Transactions on Programming Languages and Systems",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tosem/tosem",
+      "type": "journal",
+      "dblp_key": "tosem",
+      "abbr": "TOSEM",
+      "name": "ACM Transactions on Software Engineering and Methodology",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tse/tse",
+      "type": "journal",
+      "dblp_key": "tse",
+      "abbr": "TSE",
+      "name": "IEEE Transactions on Software Engineering",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tsc/tsc",
+      "type": "journal",
+      "dblp_key": "tsc",
+      "abbr": "TSC",
+      "name": "IEEE Transactions on Services Computing",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/pldi/pldi",
+      "type": "conference",
+      "dblp_key": "pldi",
+      "abbr": "PLDI",
+      "name": "ACM SIGPLAN Conference on Programming Language Design and Implementation",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/popl/popl",
+      "type": "conference",
+      "dblp_key": "popl",
+      "abbr": "POPL",
+      "name": "ACM SIGPLAN-SIGACT Symposium on Principles of Programming Languages",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/sigsoft/fse",
+      "type": "conference",
+      "dblp_key": "sigsoft",
+      "abbr": "FSE",
+      "name": "ACM International Conference on the Foundations of Software Engineering",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/sosp/sosp",
+      "type": "conference",
+      "dblp_key": "sosp",
+      "abbr": "SOSP",
+      "name": "ACM Symposium on Operating Systems Principles",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/oopsla/oopsla",
+      "type": "conference",
+      "dblp_key": "oopsla",
+      "abbr": "OOPSLA",
+      "name": "Conference on Object-Oriented Programming Systems, Languages,and Applications",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/kbse/ase",
+      "type": "conference",
+      "dblp_key": "kbse",
+      "abbr": "ASE",
+      "name": "International Conference on Automated Software Engineering",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/kbse/kbse",
+      "type": "conference",
+      "dblp_key": "kbse",
+      "abbr": "ASE",
+      "name": "International Conference on Automated Software Engineering",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/icse/icse",
+      "type": "conference",
+      "dblp_key": "icse",
+      "abbr": "ICSE",
+      "name": "International Conference on Software Engineering",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/issta/issta",
+      "type": "conference",
+      "dblp_key": "issta",
+      "abbr": "ISSTA",
+      "name": "International Symposium on Software Testing and Analysis",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/osdi/osdi",
+      "type": "conference",
+      "dblp_key": "osdi",
+      "abbr": "OSDI",
+      "name": "USENIX Symposium on Operating Systems Design and Implementation",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/fm/fm",
+      "type": "conference",
+      "dblp_key": "fm",
+      "abbr": "FM",
+      "name": "International Symposium on Formal Methods",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/sigmod/sigmod",
+      "type": "conference",
+      "dblp_key": "sigmod",
+      "abbr": "SIGMOD",
+      "name": "ACM SIGMOD Conference",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/kdd/kdd",
+      "type": "conference",
+      "dblp_key": "kdd",
+      "abbr": "SIGKDD",
+      "name": "ACM SIGKDD Conference on Knowledge Discovery and Data Mining",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/icde/icde",
+      "type": "conference",
+      "dblp_key": "icde",
+      "abbr": "ICDE",
+      "name": "IEEE International Conference on Data Engineering",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/sigir/sigir",
+      "type": "conference",
+      "dblp_key": "sigir",
+      "abbr": "SIGIR",
+      "name": "International ACM SIGIR Conference on Research and Development in Information Retrieval",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/vldb/vldb",
+      "type": "conference",
+      "dblp_key": "vldb",
+      "abbr": "VLDB",
+      "name": "International Conference on Very Large Data Bases",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/pvldb/pvldb",
+      "type": "journal",
+      "dblp_key": "pvldb",
+      "abbr": "VLDB",
+      "name": "International Conference on Very Large Data Bases",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tit/tit",
+      "type": "journal",
+      "dblp_key": "tit",
+      "abbr": "TIT",
+      "name": "IEEE Transactions on Information Theory",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/iandc/iandc",
+      "type": "journal",
+      "dblp_key": "iandc",
+      "abbr": "IANDC",
+      "name": "Information and Computation",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/siamcomp/siamcomp",
+      "type": "journal",
+      "dblp_key": "siamcomp",
+      "abbr": "SICOMP",
+      "name": "SIAM Journal on Computing",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/stoc/stoc",
+      "type": "conference",
+      "dblp_key": "stoc",
+      "abbr": "STOC",
+      "name": "ACM Symposium on the Theory of Computing",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/soda/soda",
+      "type": "conference",
+      "dblp_key": "soda",
+      "abbr": "SODA",
+      "name": "ACM-SIAM Symposium on Discrete Algorithms",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/cav/cav",
+      "type": "conference",
+      "dblp_key": "cav",
+      "abbr": "CAV",
+      "name": "International Conference on Computer Aided Verification",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/focs/focs",
+      "type": "conference",
+      "dblp_key": "focs",
+      "abbr": "FOCS",
+      "name": "IEEE Annual Symposium on Foundations of Computer Science",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/lics/lics",
+      "type": "conference",
+      "dblp_key": "lics",
+      "abbr": "LICS",
+      "name": "ACM/IEEE Symposium on Logic in Computer Science",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tog/tog",
+      "type": "journal",
+      "dblp_key": "tog",
+      "abbr": "TOG",
+      "name": "ACM Transactions on Graphics",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tip/tip",
+      "type": "journal",
+      "dblp_key": "tip",
+      "abbr": "TIP",
+      "name": "IEEE Transactions on Image Processing",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tvcg/tvcg",
+      "type": "journal",
+      "dblp_key": "tvcg",
+      "abbr": "TVCG",
+      "name": "IEEE Transactions on Visualization and Computer Graphics",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tmm/tmm",
+      "type": "journal",
+      "dblp_key": "tmm",
+      "abbr": "TMM",
+      "name": "IEEE Transactions on Multimedia",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/mm/mm",
+      "type": "conference",
+      "dblp_key": "mm",
+      "abbr": "ACM MM",
+      "name": "ACM International Conference on Multimedia",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/siggraph/siggraph",
+      "type": "conference",
+      "dblp_key": "siggraph",
+      "abbr": "SIGGRAPH",
+      "name": "ACM Special Interest Group on Computer Graphics",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/vr/vr",
+      "type": "conference",
+      "dblp_key": "vr",
+      "abbr": "VR",
+      "name": "IEEE Conference on Virtual Reality and 3D User Interfaces",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/visualization/visualization",
+      "type": "conference",
+      "dblp_key": "visualization",
+      "abbr": "IEEE VIS",
+      "name": "IEEE Visualization Conference",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/ai/ai",
+      "type": "journal",
+      "dblp_key": "ai",
+      "abbr": "AI",
+      "name": "Artificial Intelligence",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/pami/pami",
+      "type": "journal",
+      "dblp_key": "pami",
+      "abbr": "TPAMI",
+      "name": "IEEE Transactions on Pattern Analysis and Machine Intelligence",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/ijcv/ijcv",
+      "type": "journal",
+      "dblp_key": "ijcv",
+      "abbr": "IJCV",
+      "name": "International Journal of Computer Vision",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/jmlr/jmlr",
+      "type": "journal",
+      "dblp_key": "jmlr",
+      "abbr": "JMLR",
+      "name": "Journal of Machine Learning Research",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/aaai/aaai",
+      "type": "conference",
+      "dblp_key": "aaai",
+      "abbr": "AAAI",
+      "name": "AAAI Conference on Artificial Intelligence",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/nips/neurips",
+      "type": "conference",
+      "dblp_key": "nips",
+      "abbr": "NeurIPS",
+      "name": "Conference on Neural Information Processing Systems",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/nips/nips",
+      "type": "conference",
+      "dblp_key": "nips",
+      "abbr": "NeurIPS",
+      "name": "Conference on Neural Information Processing Systems",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/acl/acl",
+      "type": "conference",
+      "dblp_key": "acl",
+      "abbr": "ACL",
+      "name": "Annual Meeting of the Association for Computational Linguistics",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/cvpr/cvpr",
+      "type": "conference",
+      "dblp_key": "cvpr",
+      "abbr": "CVPR",
+      "name": "IEEE/CVF Computer Vision and Pattern Recognition Conference",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/iccv/iccv",
+      "type": "conference",
+      "dblp_key": "iccv",
+      "abbr": "ICCV",
+      "name": "International Conference on Computer Vision",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/icml/icml",
+      "type": "conference",
+      "dblp_key": "icml",
+      "abbr": "ICML",
+      "name": "International Conference on Machine Learning",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/iclr/iclr",
+      "type": "conference",
+      "dblp_key": "iclr",
+      "abbr": "ICLR",
+      "name": "International Conference on Learning Representations",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/tochi/tochi",
+      "type": "journal",
+      "dblp_key": "tochi",
+      "abbr": "TOCHI",
+      "name": "ACM Transactions on Computer-Human Interaction",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/ijmms/ijmms",
+      "type": "journal",
+      "dblp_key": "ijmms",
+      "abbr": "IJHCS",
+      "name": "International Journal of Human-Computer Studies",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/cscw/cscw",
+      "type": "conference",
+      "dblp_key": "cscw",
+      "abbr": "CSCW",
+      "name": "ACM Conference On Computer-Supported Cooperative Work And Social Computing",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/chi/chi",
+      "type": "conference",
+      "dblp_key": "chi",
+      "abbr": "CHI",
+      "name": "ACM Conference on Human Factors in Computing Systems",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/huc/ubicomp",
+      "type": "conference",
+      "dblp_key": "huc",
+      "abbr": "UbiComp",
+      "name": "ACM international joint conference on Pervasive and Ubiquitous Computing",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/uist/uist",
+      "type": "conference",
+      "dblp_key": "uist",
+      "abbr": "UIST",
+      "name": "ACM Symposium on User Interface Software and Technology",
+      "rank": "A"
+    },
+    {
+      "id": "/journals/chinaf/chinaf",
+      "type": "journal",
+      "dblp_key": "chinaf",
+      "abbr": "SCIS",
+      "name": "Science China Information Sciences",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/www/www",
+      "type": "conference",
+      "dblp_key": "www",
+      "abbr": "WWW",
+      "name": "The Web Conference",
+      "rank": "A"
+    },
+    {
+      "id": "/conf/rtss/rtss",
+      "type": "conference",
+      "dblp_key": "rtss",
+      "abbr": "RTSS",
+      "name": "IEEE Real-Time Systems Symposium",
+      "rank": "A"
+    }
+  ]
+}
