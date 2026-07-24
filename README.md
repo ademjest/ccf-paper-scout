@@ -38,10 +38,48 @@ python3 paper_scout.py --config config.json --output recommendations.md
 - `per_venue`：每个 venue/年份最多拉取多少条。
 - `max_results`：最终输出数量。
 - `min_score`：最低相关度；默认建议 `0.01`，避免为了凑数推送完全无关论文。
-- `openalex_enrich_limit`：按 DOI 从 OpenAlex 补充摘要的候选上限；设为 `0` 可获得最少请求、仅标题排序。
+- `explicit_interests`：显式研究方向，作为强正反馈加入排序；建议使用完整英文短语，如 `reinforcement learning`、`large language models`、`LLM agents`。
+- `openalex_enrich_limit`：先按标题相关性排序，再对前 N 个有 DOI 的候选从 OpenAlex 补摘要；设为 `0` 可获得最少请求、仅标题排序。
 - `recent_interest_items`：只取最近加入 Zotero 的多少篇论文作为兴趣。
 - `zotero_collection_keys`：可选；只读取这些 Zotero collection key。
 - `seen_db`：已推荐记录，防止重复推送。加 `--no-update-seen` 可试跑而不更新。
+
+## Zotero 读取调试
+
+在 `config.json` 中启用：
+
+```json
+"debug": {
+  "list_zotero_items": true,
+  "zotero_output": "zotero_library_debug.md"
+}
+```
+
+每次运行都会把实际用于兴趣建模的 Zotero 文献逐条写入 `zotero_library_debug.md`，包括 item type、标题、Zotero key、加入时间和摘要。注意：它列出的是受 `recent_interest_items` 与 `zotero_collection_keys` 限制后的语料；若要检查更多条目，提高 `recent_interest_items`。
+
+## LLM 标题和摘要翻译
+
+支持 OpenAI-compatible `/chat/completions` API。不要将密钥写入 `config.json`，而应使用环境变量：
+
+```bash
+export LLM_API_KEY='你的密钥'
+```
+
+然后配置：
+
+```json
+"llm_translation": {
+  "enabled": true,
+  "base_url": "https://你的服务地址/v1",
+  "model": "你的模型名",
+  "api_key_env": "LLM_API_KEY",
+  "language": "简体中文",
+  "timeout_seconds": 90,
+  "cache": "state/translations.json"
+}
+```
+
+程序只翻译最终选中的论文，结果缓存到 `state/translations.json`，同一论文再次出现时不会重复调用 API。若某篇候选未能从 OpenAlex 获得摘要，它仍会翻译标题，并把摘要标记为不可用。单篇翻译失败只产生 warning，不会中断整次推荐。
 
 ## 网络错误排查
 

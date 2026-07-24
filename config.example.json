@@ -4,9 +4,29 @@
   "per_venue": 30,
   "max_results": 20,
   "min_score": 0.01,
-  "openalex_enrich_limit": 20,
+  "explicit_interests": [
+    "reinforcement learning",
+    "large language models",
+    "LLM agents",
+    "autonomous agents",
+    "multi-agent reinforcement learning"
+  ],
+  "openalex_enrich_limit": 60,
   "recent_interest_items": 200,
   "zotero_collection_keys": [],
+  "debug": {
+    "list_zotero_items": true,
+    "zotero_output": "zotero_library_debug.md"
+  },
+  "llm_translation": {
+    "enabled": false,
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "api_key_env": "LLM_API_KEY",
+    "language": "简体中文",
+    "timeout_seconds": 90,
+    "cache": "state/translations.json"
+  },
   "seen_db": "state/seen.json",
   "request_delay_seconds": 1.0,
   "user_agent": "ccf-paper-scout/0.1 (personal research recommender)"

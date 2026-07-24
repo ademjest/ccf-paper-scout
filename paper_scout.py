@@ -19,11 +19,16 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#.-]{1,}|[\u4e00-\u9fff]{2,}")
+TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#-]{1,}|[\u4e00-\u9fff]{2,}")
 STOP = {
     "the", "and", "for", "with", "from", "that", "this", "using", "based", "via", "into", "towards",
     "toward", "are", "is", "of", "to", "in", "on", "a", "an", "we", "our", "their", "paper", "method",
     "methods", "approach", "new", "study", "learning", "model", "models", "data", "analysis", "system",
+    "as", "by", "which", "can", "could", "may", "also", "it", "its", "has", "have", "had", "such",
+    "than", "through", "these", "those", "existing", "propose", "proposed", "provide", "show", "shows",
+    "results", "result", "performance", "framework", "task", "tasks", "research", "introduce", "address",
+    "state", "effective", "efficient", "robust", "however", "when", "where", "while", "across", "between",
+    "all", "more", "most", "other", "over", "under", "both", "each", "any", "some", "many", "much",
 }
 
 
@@ -116,6 +121,8 @@ def fetch_zotero(config: dict[str, Any], user_agent: str) -> list[dict[str, str]
                 title = clean_text(data.get("title"))
                 if title:
                     papers[item.get("key", title)] = {
+                        "key": clean_text(item.get("key")),
+                        "itemType": clean_text(data.get("itemType")),
                         "title": title,
                         "abstract": clean_text(data.get("abstractNote")),
                         "dateAdded": clean_text(data.get("dateAdded")),
@@ -125,6 +132,19 @@ def fetch_zotero(config: dict[str, Any], user_agent: str) -> list[dict[str, str]
             start += len(batch)
     values = sorted(papers.values(), key=lambda p: p.get("dateAdded", ""), reverse=True)
     return values[:cap]
+
+
+def format_zotero_debug(papers: list[dict[str, str]]) -> str:
+    lines = [f"# Zotero 文献库调试清单", "", f"共读取 {len(papers)} 篇用于兴趣建模的文献。", ""]
+    for index, paper in enumerate(papers, 1):
+        lines.extend([
+            f"{index}. [{paper.get('itemType') or 'unknown'}] {paper.get('title') or '(无标题)'}",
+            f"   - Key: {paper.get('key') or '(无)'}",
+            f"   - Date added: {paper.get('dateAdded') or '(无)'}",
+            f"   - Abstract: {paper.get('abstract') or '(无摘要)'}",
+            "",
+        ])
+    return "\n".join(lines)
 
 
 def fetch_dblp(venue: dict[str, Any], year: int, limit: int, user_agent: str) -> list[dict[str, Any]]:
@@ -203,8 +223,90 @@ def enrich_candidates(candidates: list[dict[str, Any]], limit: int, user_agent: 
             paper["abstract"] = ""
 
 
-def rank_candidates(interests: list[dict[str, str]], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def post_json(req: urllib.request.Request, timeout: int = 60, attempts: int = 3) -> dict[str, Any]:
+    return open_json(req, timeout=timeout, attempts=attempts)
+
+
+def parse_json_object(text: str) -> dict[str, Any]:
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I | re.S)
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        raise ValueError("LLM response does not contain a JSON object")
+    return json.loads(match.group(0))
+
+
+def translate_papers(
+    papers: list[dict[str, Any]],
+    config: dict[str, Any],
+    user_agent: str,
+    cache_path: Path | None = None,
+) -> None:
+    if not config.get("enabled", False):
+        return
+    cache: dict[str, dict[str, str]] = load_json(cache_path, {}) if cache_path else {}
+    api_key = os.environ.get(config.get("api_key_env", "LLM_API_KEY"), "")
+    base_url = str(config.get("base_url") or "").rstrip("/")
+    model = str(config.get("model") or "")
+    if not api_key or not base_url or not model:
+        raise RuntimeError("LLM translation requires base_url, model, and the API key environment variable")
+    endpoint = base_url + ("" if base_url.endswith("/chat/completions") else "/chat/completions")
+    language = config.get("language", "简体中文")
+    for paper in papers:
+        cache_key = str(paper.get("id") or paper.get("title") or "")
+        if cache_key in cache:
+            paper.update(cache[cache_key])
+            continue
+        abstract = paper.get("abstract", "")
+        prompt = (
+            f"Translate the academic paper title and abstract into {language}. Preserve technical terms, names, "
+            "math, acronyms and factual meaning. Return JSON only with string fields title_zh and abstract_zh.\n\n"
+            f"Title: {paper.get('title', '')}\nAbstract: {abstract or '(abstract unavailable)'}"
+        )
+        body = {
+            "model": model,
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": "You are a precise academic translator. Output valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": user_agent},
+            method="POST",
+        )
+        try:
+            response = post_json(req, timeout=int(config.get("timeout_seconds", 90)))
+            content = response["choices"][0]["message"]["content"]
+            translated = parse_json_object(content)
+            paper["title_zh"] = clean_text(translated.get("title_zh"))
+            paper["abstract_zh"] = clean_text(translated.get("abstract_zh"))
+            if cache_key:
+                cache[cache_key] = {"title_zh": paper["title_zh"], "abstract_zh": paper["abstract_zh"]}
+                if cache_path:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except (RuntimeError, urllib.error.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+            print(f"warning: LLM translation failed for {paper.get('id', paper.get('title'))}: {exc}", file=sys.stderr)
+            paper.setdefault("title_zh", "")
+            paper.setdefault("abstract_zh", "")
+
+
+def rank_candidates(
+    interests: list[dict[str, str]],
+    candidates: list[dict[str, Any]],
+    explicit_interests: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    explicit_interests = explicit_interests or []
+    explicit_tokens = tokenize(" ".join(explicit_interests))
     interest_docs = [tokenize((p.get("title", "") + " ") * 3 + p.get("abstract", "")) for p in interests]
+    # Treat the user's declared directions as a strong, synthetic positive document.
+    if explicit_tokens:
+        interest_docs.insert(0, explicit_tokens * 8)
     if not any(interest_docs):
         raise RuntimeError("interest corpus has no usable title/abstract text")
     df: collections.Counter[str] = collections.Counter()
@@ -228,6 +330,8 @@ def rank_candidates(interests: list[dict[str, str]], candidates: list[dict[str, 
         score = 0.0
         for term, tf in counts.items():
             value = profile.get(term, 0.0) * (1 + math.log(tf)) / norm
+            if term in explicit_tokens:
+                value *= 2.5
             if value:
                 contributions[term] = value
                 score += value
@@ -249,8 +353,10 @@ def render_report(papers: list[dict[str, Any]], interest_count: int, candidate_c
     for i, p in enumerate(papers, 1):
         reasons = "、".join(p["reasons"]) if p["reasons"] else "弱匹配（可扩大兴趣集合或接入摘要补全）"
         authors = ", ".join(p["authors"][:8]) + (" et al." if len(p["authors"]) > 8 else "")
+        lines += [f"## {i}. {p['title']}", ""]
+        if p.get("title_zh"):
+            lines.append(f"- 中文标题：{p['title_zh']}")
         lines += [
-            f"## {i}. {p['title']}", "",
             f"- 相关度：{p['score']:.4f}",
             f"- Venue：{p['venue']}（CCF-{p['rank']}，{p['year']}，{p['type']}）",
             f"- 作者：{authors}",
@@ -259,6 +365,10 @@ def render_report(papers: list[dict[str, Any]], interest_count: int, candidate_c
         ]
         if p.get("ee"):
             lines.append(f"- 出版/全文入口：{p['ee']}")
+        if p.get("abstract_zh"):
+            lines.append(f"- 中文摘要：{p['abstract_zh']}")
+        if p.get("abstract"):
+            lines.append(f"- 原文摘要：{p['abstract']}")
         lines.append("")
     lines += ["---", "质量说明：所有结果均通过本地 CCF-A 白名单及 DBLP record-key 双重校验；CCF 等级仍应定期对照官方目录更新。", ""]
     return "\n".join(lines)
@@ -275,6 +385,14 @@ def main() -> int:
     config = load_json(args.config)
     user_agent = config.get("user_agent", "ccf-paper-scout/0.1")
     interests = load_json(args.interests) if args.interests else fetch_zotero(config, user_agent)
+    debug_config = config.get("debug", {})
+    if debug_config.get("list_zotero_items", False):
+        debug_path = Path(debug_config.get("zotero_output", "zotero_library_debug.md"))
+        if not debug_path.is_absolute():
+            debug_path = args.config.resolve().parent / debug_path
+        debug_path.parent.mkdir(parents=True, exist_ok=True)
+        debug_path.write_text(format_zotero_debug(interests), encoding="utf-8")
+        print(f"listed {len(interests)} Zotero items in {debug_path}")
     venue_data = load_json(args.venues)
     venue_by_key = {v["dblp_key"].lower(): v for v in venue_data["venues"] if v["rank"] == "A"}
     requested = [x.lower() for x in config.get("venue_keys", [])]
@@ -294,11 +412,18 @@ def main() -> int:
                     candidates[paper["id"]] = paper
             time.sleep(float(config.get("request_delay_seconds", 1.0)))
     candidate_values = list(candidates.values())
-    enrich_candidates(candidate_values, int(config.get("openalex_enrich_limit", 20)), user_agent)
-    ranked = rank_candidates(interests, candidate_values)
+    # A title-only first pass decides which candidates deserve metadata API calls.
+    title_ranked = rank_candidates(interests, candidate_values, config.get("explicit_interests", []))
+    enrich_candidates(title_ranked, int(config.get("openalex_enrich_limit", 20)), user_agent)
+    ranked = rank_candidates(interests, title_ranked, config.get("explicit_interests", []))
     min_score = float(config.get("min_score", 0.01))
     ranked = [paper for paper in ranked if paper["score"] >= min_score]
     selected = ranked[: int(config.get("max_results", 20))]
+    translation_config = config.get("llm_translation", {})
+    translation_cache = Path(translation_config.get("cache", "state/translations.json"))
+    if not translation_cache.is_absolute():
+        translation_cache = args.config.resolve().parent / translation_cache
+    translate_papers(selected, translation_config, user_agent, translation_cache)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(render_report(selected, len(interests), len(candidates)), encoding="utf-8")
     if not args.no_update_seen and selected:
