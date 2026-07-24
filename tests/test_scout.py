@@ -45,6 +45,24 @@ class ScoutTests(unittest.TestCase):
             self.assertEqual(scout.fetch_zotero({}, "test-agent"), [])
         self.assertEqual(urlopen.call_count, 2)
 
+    def test_open_json_does_not_retry_forbidden(self):
+        request = scout.urllib.request.Request("https://api.zotero.org/users/123/items")
+        forbidden = urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, None)
+        with mock.patch.object(scout.urllib.request, "urlopen", side_effect=forbidden) as urlopen, \
+             mock.patch.object(scout.time, "sleep") as sleep:
+            with self.assertRaises(urllib.error.HTTPError):
+                scout.open_json(request)
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_fetch_zotero_explains_forbidden_without_leaking_key(self):
+        forbidden = urllib.error.HTTPError("https://api.zotero.org/users/123/items", 403, "Forbidden", {}, None)
+        with mock.patch.dict(os.environ, {"ZOTERO_USER_ID": "123", "ZOTERO_API_KEY": "super-secret"}), \
+             mock.patch.object(scout, "open_json", side_effect=forbidden):
+            with self.assertRaisesRegex(RuntimeError, "Zotero refused access.*user ID.*read access") as raised:
+                scout.fetch_zotero({}, "test-agent")
+        self.assertNotIn("super-secret", str(raised.exception))
+
     def test_render_contains_quality_statement(self):
         text = scout.render_report([], 3, 0)
         self.assertIn("CCF-A", text)

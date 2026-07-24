@@ -42,6 +42,13 @@ def open_json(req: str | urllib.request.Request, timeout: int = 30, attempts: in
         try:
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.load(response)
+        except urllib.error.HTTPError as exc:
+            # 4xx responses are persistent request/authentication errors, not transient outages.
+            if 400 <= exc.code < 500 and exc.code != 429:
+                raise
+            last = exc
+            if attempt < attempts - 1:
+                time.sleep(2 ** attempt)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             last = exc
             if attempt < attempts - 1:
@@ -90,7 +97,17 @@ def fetch_zotero(config: dict[str, Any], user_agent: str) -> list[dict[str, str]
         while len(papers) < cap:
             url = initial + "&" + urllib.parse.urlencode({"start": start})
             req = urllib.request.Request(url, headers=headers)
-            batch = open_json(req, timeout=30)
+            try:
+                batch = open_json(req, timeout=30)
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403):
+                    raise RuntimeError(
+                        "Zotero refused access (HTTP 403/401). Verify that ZOTERO_USER_ID is the numeric "
+                        "user ID shown at https://www.zotero.org/settings/security and that ZOTERO_API_KEY "
+                        "belongs to that account with personal-library read access. If you changed the key, "
+                        "export it again in this shell."
+                    ) from None
+                raise
             if not batch:
                 break
             for item in batch:

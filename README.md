@@ -54,6 +54,19 @@ curl -I --connect-timeout 10 https://api.zotero.org/
 
 两条命令均成功后重新执行程序即可。如果在 WSL 中反复出现且 `getent` 失败，可在 Windows PowerShell 执行 `wsl --shutdown` 后重新打开 WSL；长期故障再检查 VPN/代理、防火墙和 WSL DNS 配置。不要把 API Key 粘贴到诊断输出中。
 
+若出现 `HTTP 403: Forbidden`，网络已经正常，但 Zotero 拒绝了凭据或库权限。请在 https://www.zotero.org/settings/security 核对：
+
+1. `ZOTERO_USER_ID` 是页面显示的数字 User ID，不是用户名或 Library ID；
+2. API key 与该 User ID 属于同一账号；
+3. key 至少具有个人库的只读权限；
+4. 在当前终端重新 `export ZOTERO_USER_ID=...` 和 `export ZOTERO_API_KEY=...`，注意不要带多余引号、空格或换行。
+
+可以安全地只检查变量是否存在及长度（不会打印密钥）：
+
+```bash
+python3 -c 'import os; print("ID:", os.getenv("ZOTERO_USER_ID")); print("KEY length:", len(os.getenv("ZOTERO_API_KEY", "")))'
+```
+
 ## 定时运行
 
 Linux/WSL cron 示例（每天 08:00）：
