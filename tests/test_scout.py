@@ -119,6 +119,22 @@ class ScoutTests(unittest.TestCase):
         self.assertIn("2. [conferencePaper] Second Paper", text)
         self.assertIn("Key: B2", text)
 
+    def test_llm_status_explains_disabled_even_when_endpoint_is_configured(self):
+        config = {"enabled": False, "base_url": "https://llm.example/v1", "model": "demo", "api_key_env": "LLM_API_KEY"}
+        with mock.patch.dict(os.environ, {"LLM_API_KEY": "secret"}):
+            status = scout.llm_status(config)
+        self.assertIn("disabled", status)
+        self.assertIn("enabled=true", status)
+
+    def test_filter_unseen_reports_and_excludes_seen_ids(self):
+        candidates = {
+            "conf/nips/Old25": {"id": "conf/nips/Old25"},
+            "conf/nips/New25": {"id": "conf/nips/New25"},
+        }
+        unseen, skipped = scout.filter_unseen(candidates, {"conf/nips/Old25"})
+        self.assertEqual(list(unseen), ["conf/nips/New25"])
+        self.assertEqual(skipped, 1)
+
     def test_translate_papers_calls_openai_compatible_api(self):
         papers = [{"id": "p1", "title": "Agent Learning", "abstract": "An agent learns."}]
         config = {"enabled": True, "base_url": "https://llm.example/v1", "model": "demo", "language": "简体中文"}
@@ -148,6 +164,21 @@ class ScoutTests(unittest.TestCase):
                 post_json.assert_not_called()
                 self.assertEqual(papers[0]["title_zh"], "智能体学习")
                 self.assertEqual(papers[0]["abstract_zh"], "缓存摘要")
+
+    def test_translate_papers_returns_api_and_cache_counts(self):
+        papers = [
+            {"id": "cached", "title": "Cached", "abstract": ""},
+            {"id": "fresh", "title": "Fresh", "abstract": "Fresh abstract"},
+        ]
+        config = {"enabled": True, "base_url": "https://llm.example/v1", "model": "demo"}
+        response = {"choices": [{"message": {"content": json.dumps({"title_zh": "新论文", "abstract_zh": "新摘要"}, ensure_ascii=False)}}]}
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = pathlib.Path(directory) / "translations.json"
+            cache_path.write_text(json.dumps({"cached": {"title_zh": "缓存", "abstract_zh": "缓存摘要"}}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"LLM_API_KEY": "secret"}), mock.patch.object(scout, "post_json", return_value=response):
+                counts = scout.translate_papers(papers, config, "test-agent", cache_path)
+        self.assertEqual(counts, (1, 1))
 
     def test_render_report_includes_translations_and_abstract(self):
         paper = {"title": "Agent Learning", "title_zh": "智能体学习", "abstract": "English abstract.",

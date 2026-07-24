@@ -203,9 +203,10 @@ def openalex_abstract(inverted: Any) -> str:
     return " ".join(word for _, word in sorted(positions))
 
 
-def enrich_candidates(candidates: list[dict[str, Any]], limit: int, user_agent: str) -> None:
+def enrich_candidates(candidates: list[dict[str, Any]], limit: int, user_agent: str) -> tuple[int, int]:
     """Best-effort DOI -> OpenAlex abstract enrichment; quality still comes from DBLP."""
     enriched = 0
+    attempted = 0
     for paper in candidates:
         if enriched >= limit:
             break
@@ -213,6 +214,7 @@ def enrich_candidates(candidates: list[dict[str, Any]], limit: int, user_agent: 
         if not doi_match:
             continue
         doi = doi_match.group(1).rstrip(".,)")
+        attempted += 1
         url = "https://api.openalex.org/works/" + urllib.parse.quote("https://doi.org/" + doi, safe="")
         try:
             payload = request_json(url, user_agent)
@@ -221,6 +223,30 @@ def enrich_candidates(candidates: list[dict[str, Any]], limit: int, user_agent: 
             enriched += 1
         except RuntimeError:
             paper["abstract"] = ""
+    return attempted, enriched
+
+
+def llm_status(config: dict[str, Any]) -> str:
+    key_env = str(config.get("api_key_env", "LLM_API_KEY"))
+    if not config.get("enabled", False):
+        return "LLM translation disabled (set llm_translation.enabled=true to enable it)"
+    missing = []
+    if not config.get("base_url"):
+        missing.append("base_url")
+    if not config.get("model"):
+        missing.append("model")
+    if not os.environ.get(key_env):
+        missing.append(f"environment variable {key_env}")
+    if missing:
+        return "LLM translation misconfigured; missing " + ", ".join(missing)
+    return f"LLM translation enabled: model={config['model']}, endpoint={str(config['base_url']).rstrip('/')}/chat/completions"
+
+
+def filter_unseen(
+    candidates: dict[str, dict[str, Any]], seen: set[str]
+) -> tuple[dict[str, dict[str, Any]], int]:
+    unseen = {paper_id: paper for paper_id, paper in candidates.items() if paper_id not in seen}
+    return unseen, len(candidates) - len(unseen)
 
 
 def post_json(req: urllib.request.Request, timeout: int = 60, attempts: int = 3) -> dict[str, Any]:
@@ -242,9 +268,9 @@ def translate_papers(
     config: dict[str, Any],
     user_agent: str,
     cache_path: Path | None = None,
-) -> None:
+) -> tuple[int, int]:
     if not config.get("enabled", False):
-        return
+        return 0, 0
     cache: dict[str, dict[str, str]] = load_json(cache_path, {}) if cache_path else {}
     api_key = os.environ.get(config.get("api_key_env", "LLM_API_KEY"), "")
     base_url = str(config.get("base_url") or "").rstrip("/")
@@ -253,10 +279,13 @@ def translate_papers(
         raise RuntimeError("LLM translation requires base_url, model, and the API key environment variable")
     endpoint = base_url + ("" if base_url.endswith("/chat/completions") else "/chat/completions")
     language = config.get("language", "简体中文")
+    translated_count = 0
+    cache_hits = 0
     for paper in papers:
         cache_key = str(paper.get("id") or paper.get("title") or "")
         if cache_key in cache:
             paper.update(cache[cache_key])
+            cache_hits += 1
             continue
         abstract = paper.get("abstract", "")
         prompt = (
@@ -285,6 +314,7 @@ def translate_papers(
             translated = parse_json_object(content)
             paper["title_zh"] = clean_text(translated.get("title_zh"))
             paper["abstract_zh"] = clean_text(translated.get("abstract_zh"))
+            translated_count += 1
             if cache_key:
                 cache[cache_key] = {"title_zh": paper["title_zh"], "abstract_zh": paper["abstract_zh"]}
                 if cache_path:
@@ -294,6 +324,7 @@ def translate_papers(
             print(f"warning: LLM translation failed for {paper.get('id', paper.get('title'))}: {exc}", file=sys.stderr)
             paper.setdefault("title_zh", "")
             paper.setdefault("abstract_zh", "")
+    return translated_count, cache_hits
 
 
 def rank_candidates(
@@ -384,7 +415,9 @@ def main() -> int:
     args = parser.parse_args()
     config = load_json(args.config)
     user_agent = config.get("user_agent", "ccf-paper-scout/0.1")
+    print(f"[1/7] Loading interest corpus from {'local JSON' if args.interests else 'Zotero Web API'}...")
     interests = load_json(args.interests) if args.interests else fetch_zotero(config, user_agent)
+    print(f"      Loaded {len(interests)} interest papers; explicit directions: {', '.join(config.get('explicit_interests', [])) or '(none)'}")
     debug_config = config.get("debug", {})
     if debug_config.get("list_zotero_items", False):
         debug_path = Path(debug_config.get("zotero_output", "zotero_library_debug.md"))
@@ -392,7 +425,7 @@ def main() -> int:
             debug_path = args.config.resolve().parent / debug_path
         debug_path.parent.mkdir(parents=True, exist_ok=True)
         debug_path.write_text(format_zotero_debug(interests), encoding="utf-8")
-        print(f"listed {len(interests)} Zotero items in {debug_path}")
+        print(f"      Debug listing: {debug_path}")
     venue_data = load_json(args.venues)
     venue_by_key = {v["dblp_key"].lower(): v for v in venue_data["venues"] if v["rank"] == "A"}
     requested = [x.lower() for x in config.get("venue_keys", [])]
@@ -403,34 +436,55 @@ def main() -> int:
     if not seen_path.is_absolute():
         seen_path = args.config.resolve().parent / seen_path
     seen = set(load_json(seen_path, {"ids": []}).get("ids", []))
+    print(f"[2/7] Fetching CCF-A candidates: {len(requested)} venues × {len(config.get('years', [dt.date.today().year]))} years...")
+    print(f"      Dedup history: {len(seen)} previously delivered paper IDs in {seen_path}")
     candidates: dict[str, dict[str, Any]] = {}
-    for key in requested:
+    total_raw = 0
+    for venue_index, key in enumerate(requested, 1):
+        venue_total = 0
         for year in config.get("years", [dt.date.today().year]):
             papers = fetch_dblp(venue_by_key[key], int(year), int(config.get("per_venue", 30)), user_agent)
+            total_raw += len(papers)
+            venue_total += len(papers)
             for paper in papers:
-                if paper["id"] not in seen:
-                    candidates[paper["id"]] = paper
+                candidates[paper["id"]] = paper
             time.sleep(float(config.get("request_delay_seconds", 1.0)))
+        print(f"      [{venue_index}/{len(requested)}] {venue_by_key[key]['abbr'] or key}: {venue_total} fetched")
+    candidates, skipped_seen = filter_unseen(candidates, seen)
+    print(f"[3/7] Deduplicated candidates: {total_raw} fetched, {skipped_seen} already delivered, {len(candidates)} eligible")
     candidate_values = list(candidates.values())
     # A title-only first pass decides which candidates deserve metadata API calls.
+    print("[4/7] Ranking by titles, Zotero corpus and explicit interests...")
     title_ranked = rank_candidates(interests, candidate_values, config.get("explicit_interests", []))
-    enrich_candidates(title_ranked, int(config.get("openalex_enrich_limit", 20)), user_agent)
+    enrich_limit = int(config.get("openalex_enrich_limit", 20))
+    print(f"[5/7] Enriching top candidates from OpenAlex (successful abstract limit={enrich_limit})...")
+    attempted_abstracts, enriched_abstracts = enrich_candidates(title_ranked, enrich_limit, user_agent)
+    print(f"      OpenAlex: {attempted_abstracts} DOI lookups, {enriched_abstracts} abstracts obtained")
     ranked = rank_candidates(interests, title_ranked, config.get("explicit_interests", []))
     min_score = float(config.get("min_score", 0.01))
     ranked = [paper for paper in ranked if paper["score"] >= min_score]
     selected = ranked[: int(config.get("max_results", 20))]
+    print(f"[6/7] Selected {len(selected)} papers from {len(ranked)} above min_score={min_score}")
+    for index, paper in enumerate(selected, 1):
+        print(f"      {index:02d}. [{paper['venue']} {paper['year']}] score={paper['score']:.4f} {paper['title']}")
     translation_config = config.get("llm_translation", {})
+    print(f"[7/7] {llm_status(translation_config)}")
     translation_cache = Path(translation_config.get("cache", "state/translations.json"))
     if not translation_cache.is_absolute():
         translation_cache = args.config.resolve().parent / translation_cache
-    translate_papers(selected, translation_config, user_agent, translation_cache)
+    translated_count, translation_cache_hits = translate_papers(selected, translation_config, user_agent, translation_cache)
+    if translation_config.get("enabled", False):
+        print(f"      LLM translation: {translated_count} API successes, {translation_cache_hits} cache hits")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(render_report(selected, len(interests), len(candidates)), encoding="utf-8")
     if not args.no_update_seen and selected:
         seen.update(p["id"] for p in selected)
         seen_path.parent.mkdir(parents=True, exist_ok=True)
         seen_path.write_text(json.dumps({"ids": sorted(seen)}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {len(selected)} recommendations from {len(candidates)} candidates to {args.output}")
+        print(f"      Updated dedup history: {len(seen)} paper IDs")
+    elif args.no_update_seen:
+        print("      Dedup history not updated because --no-update-seen was supplied")
+    print(f"Done: wrote {len(selected)} recommendations from {len(candidates)} eligible candidates to {args.output}")
     return 0
 
 

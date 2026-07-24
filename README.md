@@ -79,6 +79,8 @@ export LLM_API_KEY='你的密钥'
 }
 ```
 
+不要只填写 `api_key` 和 `base_url`：还必须将 `enabled` 改为 `true`。启动日志第 7 步会明确显示 LLM 是 disabled、misconfigured，还是 enabled，并在运行后报告 API 成功数与缓存命中数。
+
 程序只翻译最终选中的论文，结果缓存到 `state/translations.json`，同一论文再次出现时不会重复调用 API。若某篇候选未能从 OpenAlex 获得摘要，它仍会翻译标题，并把摘要标记为不可用。单篇翻译失败只产生 warning，不会中断整次推荐。
 
 ## 网络错误排查
@@ -107,15 +109,38 @@ curl -I --connect-timeout 10 https://api.zotero.org/
 python3 -c 'import os; print("ID:", os.getenv("ZOTERO_USER_ID")); print("KEY length:", len(os.getenv("ZOTERO_API_KEY", "")))'
 ```
 
-## 定时运行
+## 每日去重与北京时间 09:00 定时运行
 
-Linux/WSL cron 示例（每天 08:00）：
+程序使用 DBLP record key 作为稳定论文 ID，并将每次**实际输出**的论文写入 `state/seen.json`。下一次运行会在排序前排除这些 ID，因此昨天已经推送的论文不会在今天重复出现。当前状态文件已存在时，日志会显示历史 ID 数量、跳过数量和更新后的总数。
 
-```cron
-0 8 * * * cd /home/zlw/ccf-paper-scout && /usr/bin/python3 paper_scout.py --config config.json --output recommendations.md >> scout.log 2>&1
+注意：
+
+- 正式定时任务不要添加 `--no-update-seen`，否则不会记录本次推送；
+- 不要定期删除 `state/seen.json`；
+- 调试时用了 `--no-update-seen` 不会污染历史；
+- 若报告最终为空，程序不会伪造或重复旧论文来凑满 20 篇；
+- 如果在容器或 GitHub Actions 中运行，必须持久化 `state/`，否则每次都是全新文件系统，去重会失效。
+
+WSL 中的 cron 使用 Linux 当前时区。先确认：
+
+```bash
+date '+%F %T %Z %z'
 ```
 
-MVP 默认生成 Markdown，不主动发送邮件。邮件、Telegram、企业微信等推送应作为独立 adapter 接在报告之后，避免把检索、推荐和投递耦合。
+若显示 `CST +0800` 或其他 UTC+8 时区，每天北京时间 09:00 可加入 `crontab -e`：
+
+```cron
+0 9 * * * cd /home/zlw/ccf-paper-scout && /usr/bin/python3 paper_scout.py --config config.json --output recommendations.md >> paper_scout.log 2>&1
+```
+
+如果 WSL 不是 UTC+8，可在 crontab 顶部显式声明：
+
+```cron
+CRON_TZ=Asia/Shanghai
+0 9 * * * cd /home/zlw/ccf-paper-scout && /usr/bin/python3 paper_scout.py --config config.json --output recommendations.md >> paper_scout.log 2>&1
+```
+
+cron 通常不会加载交互式 shell 的 `export`。更安全的做法是创建权限为 `600`、且被 `.gitignore` 排除的本地环境文件，例如 `/home/zlw/ccf-paper-scout/.env.local`，然后用包装脚本加载 Zotero 与 LLM 环境变量；不要把 API key 直接写进 crontab 或 Git 仓库。
 
 ## 为什么不是“直接搜 arXiv + CCF-A 名称匹配”
 
