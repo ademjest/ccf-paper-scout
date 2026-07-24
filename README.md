@@ -54,6 +54,8 @@ curl -I --connect-timeout 10 https://api.zotero.org/
 
 两条命令均成功后重新执行程序即可。如果在 WSL 中反复出现且 `getent` 失败，可在 Windows PowerShell 执行 `wsl --shutdown` 后重新打开 WSL；长期故障再检查 VPN/代理、防火墙和 WSL DNS 配置。不要把 API Key 粘贴到诊断输出中。
 
+若 DBLP 出现 `RemoteDisconnected` 或连接被重置，程序会先重试主站，然后自动切换到 DBLP Trier 镜像 `dblp.uni-trier.de`。这通常是 DBLP 主站或中间网络临时断开，不是 Zotero 配置问题。
+
 若出现 `HTTP 403: Forbidden`，网络已经正常，但 Zotero 拒绝了凭据或库权限。请在 https://www.zotero.org/settings/security 核对：
 
 1. `ZOTERO_USER_ID` 是页面显示的数字 User ID，不是用户名或 Library ID；

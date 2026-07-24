@@ -6,6 +6,7 @@ import argparse
 import collections
 import datetime as dt
 import html
+import http.client
 import json
 import math
 import os
@@ -49,7 +50,7 @@ def open_json(req: str | urllib.request.Request, timeout: int = 30, attempts: in
             last = exc
             if attempt < attempts - 1:
                 time.sleep(2 ** attempt)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (urllib.error.URLError, TimeoutError, http.client.RemoteDisconnected, json.JSONDecodeError) as exc:
             last = exc
             if attempt < attempts - 1:
                 time.sleep(2 ** attempt)
@@ -129,8 +130,20 @@ def fetch_zotero(config: dict[str, Any], user_agent: str) -> list[dict[str, str]
 def fetch_dblp(venue: dict[str, Any], year: int, limit: int, user_agent: str) -> list[dict[str, Any]]:
     # Search syntax is public DBLP API syntax. We still verify every returned record key.
     query = f"venue:{venue['abbr'] or venue['dblp_key']}: year:{year}:"
-    url = "https://dblp.org/search/publ/api?" + urllib.parse.urlencode({"q": query, "h": limit, "format": "json"})
-    payload = request_json(url, user_agent)
+    params = urllib.parse.urlencode({"q": query, "h": limit, "format": "json"})
+    endpoints = (
+        "https://dblp.org/search/publ/api?" + params,
+        "https://dblp.uni-trier.de/search/publ/api?" + params,
+    )
+    errors: list[str] = []
+    for url in endpoints:
+        try:
+            payload = request_json(url, user_agent)
+            break
+        except RuntimeError as exc:
+            errors.append(str(exc))
+    else:
+        raise RuntimeError("all DBLP endpoints failed: " + " | ".join(errors))
     hits = payload.get("result", {}).get("hits", {}).get("hit", [])
     if isinstance(hits, dict):
         hits = [hits]

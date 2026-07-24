@@ -1,4 +1,5 @@
 import importlib.util
+import http.client
 import json
 import os
 import pathlib
@@ -62,6 +63,34 @@ class ScoutTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Zotero refused access.*user ID.*read access") as raised:
                 scout.fetch_zotero({}, "test-agent")
         self.assertNotIn("super-secret", str(raised.exception))
+
+    def test_open_json_retries_remote_disconnect(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        response.read.return_value = json.dumps({"ok": True}).encode()
+        response.status = 200
+        response.headers = {}
+        disconnected = http.client.RemoteDisconnected("Remote end closed connection without response")
+        with mock.patch.object(scout.urllib.request, "urlopen", side_effect=[disconnected, response]) as urlopen, \
+             mock.patch.object(scout.time, "sleep") as sleep:
+            self.assertEqual(scout.open_json("https://dblp.org/test"), {"ok": True})
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_fetch_dblp_falls_back_to_uni_trier_mirror(self):
+        venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
+        payload = {"result": {"hits": {"hit": [{"info": {
+            "key": "conf/nips/Test25", "title": "Test Paper", "year": "2025",
+            "authors": {"author": {"text": "Ada Author"}},
+            "url": "https://dblp.org/rec/conf/nips/Test25"
+        }}]}}}
+        with mock.patch.object(scout, "request_json", side_effect=[RuntimeError("primary disconnected"), payload]) as request_json:
+            papers = scout.fetch_dblp(venue, 2025, 1, "test-agent")
+        self.assertEqual(papers[0]["id"], "conf/nips/Test25")
+        self.assertEqual(request_json.call_count, 2)
+        self.assertIn("https://dblp.org/", request_json.call_args_list[0].args[0])
+        self.assertIn("https://dblp.uni-trier.de/", request_json.call_args_list[1].args[0])
 
     def test_render_contains_quality_statement(self):
         text = scout.render_report([], 3, 0)
