@@ -162,6 +162,20 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(resolved["target_unseen_per_venue"], 17)
         self.assertEqual(resolved["max_pages_per_venue"], 1)
 
+    def test_fetch_dblp_incremental_reports_all_exclusion_counts(self):
+        venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
+        pages = [([{"id": "conf/nips/Seen", "title": "Seen"}], 3, 1),
+                 ([{"id": "conf/nips/Z", "title": "An Existing Zotero Research Paper"}], 3, 1),
+                 ([{"id": "conf/nips/New", "title": "New"}], 3, 1)]
+        config = {"page_size": 1, "max_pages_per_venue": 3, "target_unseen_per_venue": 1}
+        identities = {"dois": set(), "titles": {"an existing zotero research paper"}, "arxiv_ids": set(), "dblp_ids": set()}
+        with mock.patch.object(scout, "fetch_dblp_page", side_effect=pages):
+            papers, stats = scout.fetch_dblp_incremental(venue, 2025, config, "test", {"conf/nips/Seen"}, identities)
+        self.assertEqual([p["id"] for p in papers], ["conf/nips/New"])
+        self.assertEqual(stats["delivered_skipped"], 1)
+        self.assertEqual(stats["zotero_skipped"], 1)
+        self.assertEqual(stats["raw_hits"], 3)
+
     def test_fetch_dblp_falls_back_to_uni_trier_mirror(self):
         venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
         payload = {"result": {"hits": {"hit": [{"info": {
