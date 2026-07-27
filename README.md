@@ -38,12 +38,16 @@ python3 paper_scout.py --config config.json --output recommendations.md
 
 - `venue_keys`：DBLP venue key 列表。默认示例偏 AI；可从 `data/ccf_a_venues.json` 选择其他 CCF-A venue。
 - `years`：候选年份。会议论文正式出版存在延迟，建议同时保留本年和上一年。
-- `per_venue`：每个 venue/年份最多拉取多少条。
+- `dblp.page_size`：每次 DBLP 搜索页大小。
+- `dblp.max_pages_per_venue`：每个 venue/年份单次最多翻页数，限制请求成本。
+- `dblp.target_unseen_per_venue`：找到多少篇历史未推送论文后停止翻页。
+- `dblp.stop_after_seen_pages`：连续多少页没有新论文后停止，避免无效扫描。
 - `max_results`：最终输出数量。
 - `min_score`：最低相关度；默认建议 `0.01`，避免为了凑数推送完全无关论文。
 - `explicit_interests`：显式研究方向，作为强正反馈加入排序；建议使用完整英文短语，如 `reinforcement learning`、`large language models`、`LLM agents`。
 - `openalex_enrich_limit`：先按标题相关性排序，再对前 N 个有 DOI 的候选从 OpenAlex 补摘要；设为 `0` 可获得最少请求、仅标题排序。
 - `recent_interest_items`：只取最近加入 Zotero 的多少篇论文作为兴趣。
+- `zotero_dedup_items`：用于库内去重的全库扫描上限；`0` 表示扫描全部符合类型的 Zotero 条目，不受兴趣 collection 限制。
 - `zotero_collection_keys`：可选；只读取这些 Zotero collection key。
 - `seen_db`：已推荐记录，防止重复推送。加 `--no-update-seen` 可试跑而不更新。
 
@@ -111,6 +115,14 @@ export SMTP_PASSWORD='邮箱服务商提供的 SMTP 密码或授权码'
 
 启用 SMTP 后，只有服务端接受邮件后，论文才会写入 `state/seen.json`。发送失败会使运行失败且不标记 delivered，下一次定时任务可重试。未启用任何投递通道时，生成 Markdown 即视为本地交付成功。
 
+在启用 cron 前，先执行真实 SMTP 测试：
+
+```bash
+python3 paper_scout.py --config config.json --test-delivery
+```
+
+该模式只发送一封测试邮件，不访问 Zotero/DBLP/OpenAlex/LLM，也不会生成推荐或修改 `state/seen.json`。确认收件箱、垃圾箱、中文主题和发件人均正常后，再启用每日任务。
+
 ## 网络错误排查
 
 若出现 `Temporary failure in name resolution`，这是 WSL 当时未能解析 Zotero/DBLP/OpenAlex 域名，而不是 API Key 错误。程序会自动重试 3 次。先运行：
@@ -139,9 +151,9 @@ python3 -c 'import os; print("ID:", os.getenv("ZOTERO_USER_ID")); print("KEY len
 
 ## 每日去重与北京时间 09:00 定时运行
 
-> 当前实现适合单机个人使用；报告、翻译缓存和 `state/seen.json` 已采用临时文件 + `os.replace()` 原子替换，但尚未具备进程锁和完整投递事务。请避免 cron 与手动运行重叠；SQLite/运行锁将在后续 P1 阶段实现。
+> 当前实现面向 Linux/WSL 单机个人使用；程序使用 `fcntl.flock` 获取 `state/paper_scout.lock`，cron 与手动运行重叠时第二个进程会安全退出。报告、翻译缓存和 `state/seen.json` 使用原子替换。更完整的运行历史与投递事务仍计划迁移到 SQLite。
 
-程序使用 DBLP record key 作为稳定论文 ID，并将每次**实际输出**的论文写入 `state/seen.json`。下一次运行会在排序前排除这些 ID，因此昨天已经推送的论文不会在今天重复出现。当前状态文件已存在时，日志会显示历史 ID 数量、跳过数量和更新后的总数。
+程序使用 DBLP record key 作为稳定论文 ID，并将每次**实际输出**的论文写入 `state/seen.json`。下一次运行会分页搜索并排除这些 ID；同时使用 Zotero 中的 DOI、DBLP/arXiv ID 和标准化标题排除已经收藏的论文。因此昨天推送过或 Zotero 已有的论文都不会再次进入推荐。运行日志会分别显示历史推送排除和 Zotero 库内排除数量。
 
 注意：
 
