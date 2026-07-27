@@ -135,11 +135,84 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(list(unseen), ["conf/nips/New25"])
         self.assertEqual(skipped, 1)
 
+    def test_translate_papers_adds_structured_focus_fields(self):
+        papers = [{"id": "p1", "title": "Agent Learning", "abstract": "An agent learns with tools."}]
+        config = {"enabled": True, "base_url": "https://llm.example/v1", "model": "demo", "language": "简体中文"}
+        response = {"choices": [{"message": {"content": json.dumps({
+            "title_zh": "智能体学习", "abstract_zh": "智能体借助工具学习。",
+            "focus": "工具增强智能体学习", "problem": "如何让智能体有效使用工具",
+            "method": "联合训练策略与工具调用", "novelty": "统一学习和调用决策",
+            "evidence": "在多项工具任务上评估", "limitations": "仅在摘要披露范围内",
+            "why_relevant": "与 LLM Agent 和强化学习方向相关", "tags": ["LLM Agent", "RL", "Tool Use"]
+        }, ensure_ascii=False)}}]}
+        with mock.patch.dict(os.environ, {"LLM_API_KEY": "secret"}), mock.patch.object(scout, "post_json", return_value=response):
+            scout.translate_papers(papers, config, "test-agent")
+        self.assertEqual(papers[0]["focus"], "工具增强智能体学习")
+        self.assertEqual(papers[0]["tags"], ["LLM Agent", "RL", "Tool Use"])
+
+    def test_analysis_cache_fingerprint_changes_with_interests_and_model(self):
+        paper = {"id": "p1", "title": "Agent", "abstract": "Tools"}
+        base = {"model": "m1", "language": "简体中文", "user_interests": ["agents"]}
+        original = scout.analysis_fingerprint(paper, base)
+        self.assertNotEqual(original, scout.analysis_fingerprint(paper, {**base, "model": "m2"}))
+        self.assertNotEqual(original, scout.analysis_fingerprint(paper, {**base, "user_interests": ["RL"]}))
+        self.assertNotEqual(original, scout.analysis_fingerprint({**paper, "abstract": "Changed"}, base))
+
+    def test_analysis_payload_rejects_missing_fields_and_bad_tags(self):
+        with self.assertRaisesRegex(ValueError, "focus"):
+            scout.validate_analysis_payload({"title_zh": "标题", "abstract_zh": "摘要"})
+        complete = {field: field for field in scout.ANALYSIS_STRING_FIELDS}
+        with self.assertRaisesRegex(ValueError, "2-5"):
+            scout.validate_analysis_payload({**complete, "tags": ["only-one"]})
+
+    def test_atomic_write_text_replaces_complete_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "state.json"
+            path.write_text("old", encoding="utf-8")
+            scout.atomic_write_text(path, "new content")
+            self.assertEqual(path.read_text(encoding="utf-8"), "new content")
+            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
+
+    def test_seen_update_requires_success_when_delivery_enabled(self):
+        self.assertTrue(scout.should_update_seen([{"id": "p1"}], False, False, False))
+        self.assertTrue(scout.should_update_seen([{"id": "p1"}], True, True, False))
+        self.assertFalse(scout.should_update_seen([{"id": "p1"}], True, False, False))
+        self.assertFalse(scout.should_update_seen([], True, True, False))
+        self.assertFalse(scout.should_update_seen([{"id": "p1"}], True, True, True))
+
+    def test_send_email_uses_smtp_ssl_and_returns_success(self):
+        config = {"enabled": True, "host": "smtp.example.com", "port": 465, "sender": "a@example.com", "receiver": "b@example.com", "password_env": "SMTP_PASSWORD", "use_ssl": True}
+        smtp = mock.MagicMock()
+        smtp.__enter__.return_value = smtp
+        smtp.__exit__.return_value = False
+        with mock.patch.dict(os.environ, {"SMTP_PASSWORD": "secret"}), mock.patch.object(scout.smtplib, "SMTP_SSL", return_value=smtp):
+            receipt = scout.send_email("Daily papers", "# Report", config)
+        self.assertTrue(receipt)
+        smtp.login.assert_called_once_with("a@example.com", "secret")
+        smtp.send_message.assert_called_once()
+
+    def test_delivery_disabled_does_not_claim_success(self):
+        self.assertFalse(scout.send_email("Daily papers", "# Report", {"enabled": False}))
+
+    def test_render_report_includes_focus_cards(self):
+        paper = {"title": "Agent Learning", "title_zh": "智能体学习", "abstract": "English abstract.",
+                 "abstract_zh": "中文摘要。", "focus": "工具增强智能体", "problem": "工具选择",
+                 "method": "联合学习", "novelty": "统一策略", "evidence": "多任务评测", "limitations": "摘要未报告更多限制",
+                 "why_relevant": "命中 Agent/RL", "tags": ["Agent", "RL"], "score": 1.0, "venue": "AAAI", "rank": "A", "year": 2026,
+                 "type": "conference", "authors": ["Ada"], "reasons": ["agent"], "url": "https://dblp.org/x", "ee": ""}
+        text = scout.render_report([paper], 1, 1)
+        for expected in ["论文聚焦：工具增强智能体", "解决问题：工具选择", "核心方法：联合学习", "主要创新：统一策略", "证据/实验：多任务评测", "局限提示：摘要未报告更多限制", "为何推荐：命中 Agent/RL", "主题标签：Agent、RL"]:
+            self.assertIn(expected, text)
+
     def test_translate_papers_calls_openai_compatible_api(self):
         papers = [{"id": "p1", "title": "Agent Learning", "abstract": "An agent learns."}]
         config = {"enabled": True, "base_url": "https://llm.example/v1", "model": "demo", "language": "简体中文"}
         response = {"choices": [{"message": {"content": json.dumps({
-            "title_zh": "智能体学习", "abstract_zh": "一个智能体进行学习。"
+            "title_zh": "智能体学习", "abstract_zh": "一个智能体进行学习。",
+            "focus": "智能体学习", "problem": "如何学习", "method": "训练策略",
+            "novelty": "统一训练", "evidence": "摘要未披露", "limitations": "摘要未披露",
+            "why_relevant": "与 Agent 相关", "tags": ["Agent", "Learning"]
         }, ensure_ascii=False)}}]}
         with mock.patch.dict(os.environ, {"LLM_API_KEY": "secret"}), \
              mock.patch.object(scout, "post_json", return_value=response) as post_json:
@@ -150,6 +223,23 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(request.full_url, "https://llm.example/v1/chat/completions")
         self.assertNotIn("secret", str(post_json.call_args))
 
+    def test_legacy_translation_cache_without_focus_is_refreshed(self):
+        papers = [{"id": "p1", "title": "Agent Learning", "abstract": "An agent learns."}]
+        config = {"enabled": True, "base_url": "https://llm.example/v1", "model": "demo"}
+        response = {"choices": [{"message": {"content": json.dumps({
+            "title_zh": "智能体学习", "abstract_zh": "摘要", "focus": "智能体学习",
+            "problem": "问题", "method": "方法", "novelty": "创新", "evidence": "证据",
+            "limitations": "局限", "why_relevant": "相关", "tags": ["Agent", "Learning"]
+        }, ensure_ascii=False)}}]}
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = pathlib.Path(directory) / "translations.json"
+            cache_path.write_text(json.dumps({"p1": {"title_zh": "旧翻译", "abstract_zh": "旧摘要"}}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"LLM_API_KEY": "secret"}), mock.patch.object(scout, "post_json", return_value=response) as post_json:
+                scout.translate_papers(papers, config, "test-agent", cache_path)
+            self.assertEqual(post_json.call_count, 1)
+            self.assertEqual(papers[0]["focus"], "智能体学习")
+
     def test_translate_papers_uses_cache_without_api_call(self):
         papers = [{"id": "p1", "title": "Agent Learning", "abstract": "An agent learns."}]
         config = {"enabled": True, "base_url": "https://llm.example/v1", "model": "demo"}
@@ -157,7 +247,9 @@ class ScoutTests(unittest.TestCase):
             import tempfile
             with tempfile.TemporaryDirectory() as directory:
                 cache_path = pathlib.Path(directory) / "translations.json"
-                cache_path.write_text(json.dumps({"p1": {"title_zh": "智能体学习", "abstract_zh": "缓存摘要"}}), encoding="utf-8")
+                cached = {"title_zh": "智能体学习", "abstract_zh": "缓存摘要", "focus": "缓存聚焦", "problem": "缓存问题", "method": "缓存方法", "novelty": "缓存创新", "evidence": "缓存证据", "limitations": "缓存局限", "why_relevant": "缓存相关", "tags": ["Agent", "RL"]}
+                cached["_fingerprint"] = scout.analysis_fingerprint(papers[0], config)
+                cache_path.write_text(json.dumps({"p1": cached}), encoding="utf-8")
                 with mock.patch.dict(os.environ, {"LLM_API_KEY": "secret"}), \
                      mock.patch.object(scout, "post_json") as post_json:
                     scout.translate_papers(papers, config, "test-agent", cache_path)
@@ -171,11 +263,13 @@ class ScoutTests(unittest.TestCase):
             {"id": "fresh", "title": "Fresh", "abstract": "Fresh abstract"},
         ]
         config = {"enabled": True, "base_url": "https://llm.example/v1", "model": "demo"}
-        response = {"choices": [{"message": {"content": json.dumps({"title_zh": "新论文", "abstract_zh": "新摘要"}, ensure_ascii=False)}}]}
+        response = {"choices": [{"message": {"content": json.dumps({"title_zh": "新论文", "abstract_zh": "新摘要", "focus": "新聚焦", "problem": "新问题", "method": "新方法", "novelty": "新创新", "evidence": "新证据", "limitations": "新局限", "why_relevant": "新相关", "tags": ["Agent", "RL"]}, ensure_ascii=False)}}]}
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
             cache_path = pathlib.Path(directory) / "translations.json"
-            cache_path.write_text(json.dumps({"cached": {"title_zh": "缓存", "abstract_zh": "缓存摘要"}}), encoding="utf-8")
+            cached = {"title_zh": "缓存", "abstract_zh": "缓存摘要", "focus": "缓存聚焦", "problem": "缓存问题", "method": "缓存方法", "novelty": "缓存创新", "evidence": "缓存证据", "limitations": "缓存局限", "why_relevant": "缓存相关", "tags": ["Agent", "RL"]}
+            cached["_fingerprint"] = scout.analysis_fingerprint(papers[0], config)
+            cache_path.write_text(json.dumps({"cached": cached}), encoding="utf-8")
             with mock.patch.dict(os.environ, {"LLM_API_KEY": "secret"}), mock.patch.object(scout, "post_json", return_value=response):
                 counts = scout.translate_papers(papers, config, "test-agent", cache_path)
         self.assertEqual(counts, (1, 1))
@@ -188,6 +282,29 @@ class ScoutTests(unittest.TestCase):
         self.assertIn("中文标题：智能体学习", text)
         self.assertIn("中文摘要：中文摘要。", text)
         self.assertIn("原文摘要：English abstract.", text)
+
+    def test_build_venue_data_parser_extracts_javascript_mapping(self):
+        from scripts import build_venue_data
+        text = 'ccf.rankUrl = {\n  "/conf/nips/nips": "A",\n  "/conf/test/test": "B",\n};'
+        self.assertEqual(build_venue_data.parse_mapping(text), {"/conf/nips/nips": "A", "/conf/test/test": "B"})
+
+    def test_venue_data_has_unique_runtime_keys(self):
+        data = json.loads((ROOT / "data" / "ccf_a_venues.json").read_text(encoding="utf-8"))
+        keys = [(venue["type"], venue["dblp_key"].lower()) for venue in data["venues"]]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual(data["source_commit"], "540396b36bfb46b18cfed22bf5c578d73257c4b9")
+
+    def test_openalex_not_found_is_best_effort(self):
+        papers = [
+            {"id": "missing", "title": "Missing", "ee": "https://doi.org/10.1/missing"},
+            {"id": "found", "title": "Found", "ee": "https://doi.org/10.1/found"},
+        ]
+        not_found = urllib.error.HTTPError("https://api.openalex.org/x", 404, "Not Found", {}, None)
+        payload = {"id": "W1", "abstract_inverted_index": {"useful": [0], "abstract": [1]}}
+        with mock.patch.object(scout, "request_json", side_effect=[not_found, payload]):
+            stats = scout.enrich_candidates(papers, 1, "test-agent")
+        self.assertEqual(stats, (2, 1, 1, 0))
+        self.assertEqual(papers[1]["abstract"], "useful abstract")
 
     def test_render_contains_quality_statement(self):
         text = scout.render_report([], 3, 0)

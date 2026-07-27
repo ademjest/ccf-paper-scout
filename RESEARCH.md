@@ -168,10 +168,10 @@ SQLite 表建议：`papers`、`external_ids`、`venues`、`interest_items`、`re
 - DOI → OpenAlex 摘要补全；
 - 本地稀疏相关度与可解释关键词；
 - 已推荐去重；
-- Markdown 报告；
-- 纯标准库，无 GPU/torch/LLM/向量库。
+- Markdown 报告、可选 LLM 双语特色卡片与 SMTP 投递；
+- 纯标准库核心，无 GPU、torch 或向量数据库。
 
-真实运行验证：从 AAAI 2025 和 NeurIPS 2025 获取 20 个通过资格门的候选，使用 3 篇示例兴趣论文生成 5 条推荐；4 个单元测试全部通过；非法 venue key 会以退出码 2 被硬拒绝。
+最新验证应以 CI 与 `python3 -m unittest discover -s tests -p 'test_*.py' -v` 的实际输出为准；历史小规模实跑仅用于证明端到端路径，不代表完整推荐质量评测。
 
 ## 8. 下一步优先级
 
