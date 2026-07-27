@@ -15,7 +15,7 @@
   "recent_interest_items": 200,
   "zotero_collection_keys": [],
   "debug": {
-    "list_zotero_items": true,
+    "list_zotero_items": false,
     "zotero_output": "zotero_library_debug.md"
   },
   "llm_translation": {
@@ -26,6 +26,19 @@
     "language": "简体中文",
     "timeout_seconds": 90,
     "cache": "state/translations.json"
+  },
+  "delivery": {
+    "smtp": {
+      "enabled": false,
+      "host": "smtp.example.com",
+      "port": 465,
+      "use_ssl": true,
+      "sender": "sender@example.com",
+      "receiver": "receiver@example.com",
+      "password_env": "SMTP_PASSWORD",
+      "subject": "CCF Paper Scout 每日论文推荐",
+      "timeout_seconds": 60
+    }
   },
   "seen_db": "state/seen.json",
   "request_delay_seconds": 1.0,

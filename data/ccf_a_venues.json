@@ -1,7 +1,21 @@
 {
   "source": "https://github.com/WenyanLiu/CCFrank4dblp",
-  "source_updated": "2026-04-06",
-  "note": "Derived CCF venue metadata; verify against the official current CCF catalog.",
+  "source_commit": "540396b36bfb46b18cfed22bf5c578d73257c4b9",
+  "source_files": [
+    "data/ccfRankUrl.js",
+    "data/ccfRankFull.js",
+    "data/ccfRankAbbr.js"
+  ],
+  "license": "MIT",
+  "note": "Derived CCF venue metadata for whitelist constraints; not an official CCF API. Verify against the latest official catalog.",
+  "aliases_removed": {
+    "conference:kbse": [
+      "/conf/kbse/kbse"
+    ],
+    "conference:nips": [
+      "/conf/nips/nips"
+    ]
+  },
   "venues": [
     {
       "id": "/journals/tocs/tocs",
@@ -348,14 +362,6 @@
       "rank": "A"
     },
     {
-      "id": "/conf/kbse/kbse",
-      "type": "conference",
-      "dblp_key": "kbse",
-      "abbr": "ASE",
-      "name": "International Conference on Automated Software Engineering",
-      "rank": "A"
-    },
-    {
       "id": "/conf/icse/icse",
       "type": "conference",
       "dblp_key": "icse",
@@ -605,14 +611,6 @@
     },
     {
       "id": "/conf/nips/neurips",
-      "type": "conference",
-      "dblp_key": "nips",
-      "abbr": "NeurIPS",
-      "name": "Conference on Neural Information Processing Systems",
-      "rank": "A"
-    },
-    {
-      "id": "/conf/nips/nips",
       "type": "conference",
       "dblp_key": "nips",
       "abbr": "NeurIPS",

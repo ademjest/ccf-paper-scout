@@ -1,21 +1,24 @@
 # CCF-A Paper Scout
 
-一个低资源、可解释的 Zotero 兴趣论文推荐 MVP。它不把 arXiv 当作“质量标签”，而是先从 DBLP 获取已被目标 venue 收录的论文，再用 CCF-A 白名单做硬过滤，最后按你的 Zotero 论文标题/摘要做本地排序。
+一个非官方、低资源、可解释的 Zotero 个性化正式论文候选筛选器。它先用配置的 CCF-A venue 白名单约束 DBLP 检索，再以 DBLP record-key 前缀复核降低文本误命中，最后在本地结合 Zotero 标题/摘要和显式兴趣排序。OpenAlex 摘要补全、LLM 双语特色提炼和 SMTP 邮件投递均为可选功能。
+
+> CCF venue 等级是 venue 级参考信号，不代表对单篇论文科学质量的评价。本项目不隶属于或受 CCF、Zotero、DBLP、OpenAlex、任何会议或出版社背书。
 
 ## 核心原则
 
-1. **质量过滤先于推荐**：候选论文必须命中维护过的 CCF-A venue 白名单。
-2. **DBLP key 优先**：用 DBLP record key（如 `conf/nips/...`）识别会议，避免只靠易混淆的 venue 文本。
-3. **低资源**：仅 Python 标准库；稀疏 TF-IDF + BM25 风格词项评分，不需要 GPU、Torch、向量数据库或 LLM。
-4. **隐私友好**：Zotero 数据只在本机读取；只向 DBLP 请求公开候选元数据。
-5. **可解释**：每条推荐显示匹配关键词、venue、年份和 DBLP 链接。
+1. **venue 资格约束先于推荐**：候选论文必须命中维护过的 CCF-A venue 白名单；这不是对单篇质量的认证。
+2. **DBLP key 优先**：用 DBLP record key（如 `conf/nips/...`）做前缀复核，避免只靠易混淆的 venue 文本；它与白名单不是两个独立认证源。
+3. **低资源**：仅 Python 标准库；默认使用带时间权重的稀疏词项匹配，不需要 GPU、Torch 或向量数据库。
+4. **有边界的隐私设计**：Zotero 兴趣语料仅在本地参与排序，不发送给 DBLP、OpenAlex 或 LLM；可选 LLM 只接收最终候选的标题和摘要。
+5. **可解释与可读**：每条推荐显示贡献词、venue、年份、DBLP 链接，并可用 LLM生成论文聚焦、问题、方法、创新、证据、局限与相关性提示。
 
 ## 快速开始
 
 要求 Python 3.11+，无需安装依赖。
 
 ```bash
-cd /home/zlw/ccf-paper-scout
+git clone https://github.com/ademjest/ccf-paper-scout.git
+cd ccf-paper-scout
 cp config.example.json config.json
 cp interests.example.json interests.json
 python3 paper_scout.py --config config.json --interests interests.json --output recommendations.md
@@ -81,7 +84,32 @@ export LLM_API_KEY='你的密钥'
 
 不要只填写 `api_key` 和 `base_url`：还必须将 `enabled` 改为 `true`。启动日志第 7 步会明确显示 LLM 是 disabled、misconfigured，还是 enabled，并在运行后报告 API 成功数与缓存命中数。
 
-程序只翻译最终选中的论文，结果缓存到 `state/translations.json`，同一论文再次出现时不会重复调用 API。若某篇候选未能从 OpenAlex 获得摘要，它仍会翻译标题，并把摘要标记为不可用。单篇翻译失败只产生 warning，不会中断整次推荐。
+程序只分析最终选中的论文，结果缓存到 `state/translations.json`，同一论文再次出现时不会重复调用 API。输出除了双语标题和摘要，还可包含：论文聚焦、解决问题、核心方法、主要创新、摘要披露的证据/实验、局限提示、为何与你的显式兴趣相关以及主题标签。所有内容都被要求严格基于标题与摘要；摘要没有披露的事实会标记为“摘要未披露”，而不是猜测。单篇分析失败只产生 warning，不会中断整次推荐。
+
+## SMTP 邮件投递
+
+在 `config.json` 中启用 `delivery.smtp`，密码只放在环境变量：
+
+```bash
+export SMTP_PASSWORD='邮箱服务商提供的 SMTP 密码或授权码'
+```
+
+```json
+"delivery": {
+  "smtp": {
+    "enabled": true,
+    "host": "smtp.example.com",
+    "port": 465,
+    "use_ssl": true,
+    "sender": "sender@example.com",
+    "receiver": "receiver@example.com",
+    "password_env": "SMTP_PASSWORD",
+    "subject": "CCF Paper Scout 每日论文推荐"
+  }
+}
+```
+
+启用 SMTP 后，只有服务端接受邮件后，论文才会写入 `state/seen.json`。发送失败会使运行失败且不标记 delivered，下一次定时任务可重试。未启用任何投递通道时，生成 Markdown 即视为本地交付成功。
 
 ## 网络错误排查
 
@@ -111,6 +139,8 @@ python3 -c 'import os; print("ID:", os.getenv("ZOTERO_USER_ID")); print("KEY len
 
 ## 每日去重与北京时间 09:00 定时运行
 
+> 当前实现适合单机个人使用；报告、翻译缓存和 `state/seen.json` 已采用临时文件 + `os.replace()` 原子替换，但尚未具备进程锁和完整投递事务。请避免 cron 与手动运行重叠；SQLite/运行锁将在后续 P1 阶段实现。
+
 程序使用 DBLP record key 作为稳定论文 ID，并将每次**实际输出**的论文写入 `state/seen.json`。下一次运行会在排序前排除这些 ID，因此昨天已经推送的论文不会在今天重复出现。当前状态文件已存在时，日志会显示历史 ID 数量、跳过数量和更新后的总数。
 
 注意：
@@ -130,17 +160,17 @@ date '+%F %T %Z %z'
 若显示 `CST +0800` 或其他 UTC+8 时区，每天北京时间 09:00 可加入 `crontab -e`：
 
 ```cron
-0 9 * * * cd /home/zlw/ccf-paper-scout && /usr/bin/python3 paper_scout.py --config config.json --output recommendations.md >> paper_scout.log 2>&1
+0 9 * * * PROJECT_DIR=$HOME/ccf-paper-scout $HOME/ccf-paper-scout/scripts/run_daily.sh >> $HOME/ccf-paper-scout/paper_scout.log 2>&1
 ```
 
 如果 WSL 不是 UTC+8，可在 crontab 顶部显式声明：
 
 ```cron
 CRON_TZ=Asia/Shanghai
-0 9 * * * cd /home/zlw/ccf-paper-scout && /usr/bin/python3 paper_scout.py --config config.json --output recommendations.md >> paper_scout.log 2>&1
+0 9 * * * PROJECT_DIR=$HOME/ccf-paper-scout $HOME/ccf-paper-scout/scripts/run_daily.sh >> $HOME/ccf-paper-scout/paper_scout.log 2>&1
 ```
 
-cron 通常不会加载交互式 shell 的 `export`。更安全的做法是创建权限为 `600`、且被 `.gitignore` 排除的本地环境文件，例如 `/home/zlw/ccf-paper-scout/.env.local`，然后用包装脚本加载 Zotero 与 LLM 环境变量；不要把 API key 直接写进 crontab 或 Git 仓库。
+cron 通常不会加载交互式 shell 的 `export`。创建权限为 `600` 且被 `.gitignore` 排除的 `$HOME/ccf-paper-scout/.env.local`，写入 `ZOTERO_USER_ID`、`ZOTERO_API_KEY`、可选 `LLM_API_KEY` 与 `SMTP_PASSWORD`。包装脚本 `scripts/run_daily.sh` 会自动加载它；不要把任何密钥写进 crontab 或 Git 仓库。
 
 ## 为什么不是“直接搜 arXiv + CCF-A 名称匹配”
 
@@ -149,9 +179,19 @@ arXiv 的 `comment` 中出现 “accepted at ...” 不是权威录用元数据�
 - **严格通道（本 MVP）**：DBLP / 官方 proceedings / OpenReview 已接收列表 → CCF-A 白名单；精度高，可能稍晚。
 - **早期通道（后续可选）**：arXiv/OpenReview 新稿 → 声称 venue → 再与官方 accepted-paper 列表核验；更快，但不能在核验前标作 CCF-A 论文。
 
-## 数据与许可说明
+## 数据、隐私与许可证
 
-`data/ccf_a_venues.json` 是从 `WenyanLiu/CCFrank4dblp` 的公开 MIT 数据文件派生的 venue 映射，源文件标注更新于 2026-04-06。CCF 等级应定期与 CCF 官方最新版目录复核；本项目不宣称该派生表是 CCF 官方 API。
+- Venue 数据来源和限制：[`data/README.md`](data/README.md)
+- 隐私与数据流：[`docs/privacy.md`](docs/privacy.md)
+- 当前能力边界和新增论文源策略：[`docs/limitations.md`](docs/limitations.md)
+- 代码与数据溯源：[`docs/provenance.md`](docs/provenance.md)
+- 本项目代码采用 Apache-2.0；第三方归属见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
+`data/ccf_a_venues.json` 是从 `WenyanLiu/CCFrank4dblp` 固定版本的公开 MIT 数据文件派生的 venue 映射。CCF 等级应定期与官方最新版目录复核；本项目不宣称该派生表是 CCF 官方 API。
+
+## Acknowledgements
+
+本项目为独立实现，概念上受到 `TideDra/zotero-arxiv-daily` 的 Zotero 个性化论文发现流程启发；venue 数据派生自 `WenyanLiu/CCFrank4dblp`。未来反馈设计参考了 `yuandong-tian/arXiv_recbot`。致谢不表示代码复用、隶属或背书。
 
 ## 当前 MVP 的边界
 
