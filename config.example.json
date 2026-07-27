@@ -1,7 +1,12 @@
 {
   "years": [2026, 2025],
   "venue_keys": ["nips", "icml", "cvpr", "iccv", "aaai", "ijcai", "acl", "sigir", "kdd"],
-  "per_venue": 30,
+  "dblp": {
+    "page_size": 100,
+    "max_pages_per_venue": 5,
+    "target_unseen_per_venue": 30,
+    "stop_after_seen_pages": 2
+  },
   "max_results": 20,
   "min_score": 0.01,
   "explicit_interests": [
@@ -13,6 +18,7 @@
   ],
   "openalex_enrich_limit": 60,
   "recent_interest_items": 200,
+  "zotero_dedup_items": 0,
   "zotero_collection_keys": [],
   "debug": {
     "list_zotero_items": false,
@@ -41,6 +47,7 @@
     }
   },
   "seen_db": "state/seen.json",
+  "run_lock": "state/paper_scout.lock",
   "request_delay_seconds": 1.0,
   "user_agent": "ccf-paper-scout/0.1 (personal research recommender)"
 }

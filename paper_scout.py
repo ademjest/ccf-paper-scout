@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import collections
 import datetime as dt
+import fcntl
 import hashlib
 import html
 import http.client
@@ -40,6 +41,35 @@ STOP = {
     "state", "effective", "efficient", "robust", "however", "when", "where", "while", "across", "between",
     "all", "more", "most", "other", "over", "under", "both", "each", "any", "some", "many", "much",
 }
+
+
+class RunLock:
+    """Advisory single-instance lock for local/cron runs on Linux/WSL."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.handle: Any = None
+
+    def __enter__(self) -> "RunLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.handle.close()
+            self.handle = None
+            raise RuntimeError(f"another Paper Scout run is active (lock: {self.path})") from None
+        self.handle.seek(0)
+        self.handle.truncate()
+        self.handle.write(f"pid={os.getpid()} started={dt.datetime.now().astimezone().isoformat()}\n")
+        self.handle.flush()
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        if self.handle is not None:
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+            self.handle.close()
+            self.handle = None
 
 
 def atomic_write_text(path: Path, content: str) -> None:
@@ -103,7 +133,10 @@ def tokenize(text: str) -> list[str]:
     return [t.lower() for t in TOKEN_RE.findall(text) if t.lower() not in STOP and len(t) > 1]
 
 
-def fetch_zotero(config: dict[str, Any], user_agent: str) -> list[dict[str, str]]:
+def fetch_zotero(
+    config: dict[str, Any], user_agent: str, *, cap_override: int | None = None,
+    use_collection_filter: bool = True,
+) -> list[dict[str, str]]:
     user_id = os.environ.get("ZOTERO_USER_ID")
     api_key = os.environ.get("ZOTERO_API_KEY")
     if not user_id or not api_key:
@@ -113,7 +146,7 @@ def fetch_zotero(config: dict[str, Any], user_agent: str) -> list[dict[str, str]
         "format": "json", "limit": "100", "sort": "dateAdded", "direction": "desc",
         "itemType": "journalArticle || conferencePaper || preprint",
     }
-    collections = config.get("zotero_collection_keys") or []
+    collections = (config.get("zotero_collection_keys") or []) if use_collection_filter else []
     urls: list[str] = []
     if collections:
         for key in collections:
@@ -122,10 +155,10 @@ def fetch_zotero(config: dict[str, Any], user_agent: str) -> list[dict[str, str]
         urls.append(base + "?" + urllib.parse.urlencode(params))
     headers = {"User-Agent": user_agent, "Zotero-API-Key": api_key, "Accept": "application/json"}
     papers: dict[str, dict[str, str]] = {}
-    cap = int(config.get("recent_interest_items", 200))
+    cap = cap_override if cap_override is not None else int(config.get("recent_interest_items", 200))
     for initial in urls:
         start = 0
-        while len(papers) < cap:
+        while cap <= 0 or len(papers) < cap:
             url = initial + "&" + urllib.parse.urlencode({"start": start})
             req = urllib.request.Request(url, headers=headers)
             try:
@@ -151,12 +184,78 @@ def fetch_zotero(config: dict[str, Any], user_agent: str) -> list[dict[str, str]
                         "title": title,
                         "abstract": clean_text(data.get("abstractNote")),
                         "dateAdded": clean_text(data.get("dateAdded")),
+                        "doi": clean_text(data.get("DOI")),
+                        "url": clean_text(data.get("url")),
+                        "extra": clean_text(data.get("extra")),
                     }
             if len(batch) < 100:
                 break
             start += len(batch)
     values = sorted(papers.values(), key=lambda p: p.get("dateAdded", ""), reverse=True)
-    return values[:cap]
+    return values if cap <= 0 else values[:cap]
+
+
+def normalize_doi(value: str) -> str:
+    value = clean_text(value).lower().strip()
+    value = re.sub(r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", "", value)
+    match = re.search(r"10\.\d{4,9}/[^\s?#]+", value)
+    return match.group(0).rstrip(".,;)") if match else ""
+
+
+def normalize_title(value: str) -> str:
+    value = html.unescape(clean_text(value)).lower().replace("&", " and ")
+    value = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", value)
+    return " ".join(value.split())
+
+
+def extract_external_ids(text: str) -> tuple[set[str], set[str]]:
+    text = clean_text(text)
+    arxiv_ids = {match.lower() for match in re.findall(r"(?:arxiv(?:\.org/(?:abs|pdf)/|:\s*))([0-9]{4}\.[0-9]{4,5}(?:v\d+)?)", text, re.I)}
+    dblp_ids = {match.lower() for match in re.findall(r"(?:dblp(?:\.org/rec/|:\s*))((?:conf|journals)/[^\s,;]+)", text, re.I)}
+    return arxiv_ids, dblp_ids
+
+
+def build_zotero_identity_index(interests: list[dict[str, str]]) -> dict[str, set[str]]:
+    identities = {"dois": set(), "titles": set(), "arxiv_ids": set(), "dblp_ids": set()}
+    for paper in interests:
+        doi = normalize_doi(paper.get("doi", ""))
+        title = normalize_title(paper.get("title", ""))
+        if doi:
+            identities["dois"].add(doi)
+        if title and len(title) >= 20 and len(title.split()) >= 3:
+            identities["titles"].add(title)
+        external_text = " ".join((paper.get("url", ""), paper.get("extra", "")))
+        arxiv_ids, dblp_ids = extract_external_ids(external_text)
+        identities["arxiv_ids"].update(arxiv_ids)
+        identities["dblp_ids"].update(dblp_ids)
+    return identities
+
+
+def filter_one_zotero_existing(paper: dict[str, Any], identities: dict[str, set[str]]) -> str:
+    doi = normalize_doi(paper.get("doi", "") or paper.get("ee", ""))
+    if doi and doi in identities["dois"]:
+        return "doi"
+    arxiv_ids, dblp_ids = extract_external_ids(" ".join((paper.get("id", ""), paper.get("url", ""), paper.get("ee", ""))))
+    if arxiv_ids & identities["arxiv_ids"] or dblp_ids & identities["dblp_ids"]:
+        return "external_id"
+    title = normalize_title(paper.get("title", ""))
+    if title and title in identities["titles"]:
+        return "title"
+    return ""
+
+
+def filter_zotero_existing(
+    candidates: dict[str, dict[str, Any]], identities: dict[str, set[str]]
+) -> tuple[dict[str, dict[str, Any]], dict[str, int]]:
+    filtered: dict[str, dict[str, Any]] = {}
+    stats = {"doi": 0, "external_id": 0, "title": 0}
+    for paper_id, paper in candidates.items():
+        reason = filter_one_zotero_existing(paper, identities)
+        if reason:
+            stats[reason] += 1
+            continue
+        filtered[paper_id] = paper
+    return filtered, stats
 
 
 def format_zotero_debug(papers: list[dict[str, str]]) -> str:
@@ -172,10 +271,12 @@ def format_zotero_debug(papers: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def fetch_dblp(venue: dict[str, Any], year: int, limit: int, user_agent: str) -> list[dict[str, Any]]:
-    # Search syntax is public DBLP API syntax. We still verify every returned record key.
+def fetch_dblp_page(
+    venue: dict[str, Any], year: int, limit: int, start: int, user_agent: str
+) -> tuple[list[dict[str, Any]], int | None, int]:
+    """Fetch one DBLP search page and return verified records plus reported total."""
     query = f"venue:{venue['abbr'] or venue['dblp_key']}: year:{year}:"
-    params = urllib.parse.urlencode({"q": query, "h": limit, "format": "json"})
+    params = urllib.parse.urlencode({"q": query, "h": limit, "f": start, "format": "json"})
     endpoints = (
         "https://dblp.org/search/publ/api?" + params,
         "https://dblp.uni-trier.de/search/publ/api?" + params,
@@ -189,33 +290,97 @@ def fetch_dblp(venue: dict[str, Any], year: int, limit: int, user_agent: str) ->
             errors.append(str(exc))
     else:
         raise RuntimeError("all DBLP endpoints failed: " + " | ".join(errors))
-    hits = payload.get("result", {}).get("hits", {}).get("hit", [])
+    hits_payload = payload.get("result", {}).get("hits", {})
+    try:
+        total: int | None = int(hits_payload["@total"])
+    except (KeyError, TypeError, ValueError):
+        total = None
+    hits = hits_payload.get("hit", [])
     if isinstance(hits, dict):
         hits = [hits]
+    raw_count = len(hits)
     result = []
     prefix = ("conf/" if venue["type"] == "conference" else "journals/") + venue["dblp_key"] + "/"
     for hit in hits:
         info = hit.get("info", {})
         key = clean_text(info.get("key"))
-        # Hard quality gate: text match alone cannot pass.
         if not key.startswith(prefix):
             continue
         authors = info.get("authors", {}).get("author", [])
         if isinstance(authors, (str, dict)):
             authors = [authors]
+        ee = clean_text(info.get("ee"))
+        doi_match = re.search(r"(?:doi\.org/|doi:)(10\.[^\s?#]+)", ee, re.I)
+        doi = doi_match.group(1).rstrip(".,)") if doi_match else ""
         result.append({
             "id": key,
             "title": clean_text(info.get("title")),
-            "authors": [clean_text(a) for a in authors],
+            "authors": [clean_text(author) for author in authors],
             "year": int(clean_text(info.get("year")) or year),
             "venue": venue["abbr"] or clean_text(info.get("venue")),
             "venue_name": venue["name"],
             "rank": venue["rank"],
             "type": venue["type"],
             "url": clean_text(info.get("url")) or f"https://dblp.org/rec/{key}",
-            "ee": clean_text(info.get("ee")),
+            "ee": ee,
+            "doi": doi,
         })
-    return result
+    return result, total, raw_count
+
+
+def resolve_dblp_config(config: dict[str, Any]) -> dict[str, int]:
+    if "dblp" in config:
+        return dict(config.get("dblp") or {})
+    legacy = max(1, int(config.get("per_venue", 30)))
+    return {
+        "page_size": legacy,
+        "max_pages_per_venue": 1,
+        "target_unseen_per_venue": legacy,
+        "stop_after_seen_pages": 1,
+    }
+
+
+def fetch_dblp_incremental(
+    venue: dict[str, Any], year: int, config: dict[str, Any], user_agent: str, seen: set[str],
+    zotero_identities: dict[str, set[str]] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    page_size = max(1, int(config.get("page_size", 100)))
+    max_pages = max(1, int(config.get("max_pages_per_venue", 5)))
+    target_unseen = max(1, int(config.get("target_unseen_per_venue", page_size)))
+    stop_after_seen = max(1, int(config.get("stop_after_seen_pages", 2)))
+    zotero_identities = zotero_identities or {"dois": set(), "titles": set(), "arxiv_ids": set(), "dblp_ids": set()}
+    unseen: list[dict[str, Any]] = []
+    all_ids: set[str] = set()
+    consecutive_seen_pages = 0
+    pages = 0
+    fetched = 0
+    for page_index in range(max_pages):
+        start = page_index * page_size
+        page, total, raw_count = fetch_dblp_page(venue, year, page_size, start, user_agent)
+        pages += 1
+        fetched += len(page)
+        new_on_page = 0
+        for paper in page:
+            paper_id = paper["id"]
+            if paper_id in all_ids:
+                continue
+            all_ids.add(paper_id)
+            if paper_id not in seen and not filter_one_zotero_existing(paper, zotero_identities):
+                unseen.append(paper)
+                new_on_page += 1
+        consecutive_seen_pages = consecutive_seen_pages + 1 if new_on_page == 0 else 0
+        if len(unseen) >= target_unseen:
+            break
+        if raw_count == 0 or (total is not None and start + raw_count >= total):
+            break
+        if consecutive_seen_pages >= stop_after_seen and unseen:
+            break
+    return unseen, {"pages": pages, "fetched": fetched, "unseen": len(unseen)}
+
+
+def fetch_dblp(venue: dict[str, Any], year: int, limit: int, user_agent: str) -> list[dict[str, Any]]:
+    papers, _, _ = fetch_dblp_page(venue, year, limit, 0, user_agent)
+    return papers
 
 
 def openalex_abstract(inverted: Any) -> str:
@@ -533,19 +698,21 @@ def render_report(papers: list[dict[str, Any]], interest_count: int, candidate_c
     return "\n".join(lines)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("config.json"))
-    parser.add_argument("--interests", type=Path, help="local JSON list; otherwise use Zotero Web API")
-    parser.add_argument("--venues", type=Path, default=Path(__file__).parent / "data/ccf_a_venues.json")
-    parser.add_argument("--output", type=Path, default=Path("recommendations.md"))
-    parser.add_argument("--no-update-seen", action="store_true")
-    args = parser.parse_args()
-    config = load_json(args.config)
+def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     user_agent = config.get("user_agent", "ccf-paper-scout/0.1")
     print(f"[1/7] Loading interest corpus from {'local JSON' if args.interests else 'Zotero Web API'}...")
     interests = load_json(args.interests) if args.interests else fetch_zotero(config, user_agent)
-    print(f"      Loaded {len(interests)} interest papers; explicit directions: {', '.join(config.get('explicit_interests', [])) or '(none)'}")
+    if args.interests:
+        zotero_identity_papers = interests
+    else:
+        dedup_cap = int(config.get("zotero_dedup_items", 0))
+        zotero_identity_papers = fetch_zotero(
+            config, user_agent, cap_override=dedup_cap, use_collection_filter=False
+        )
+    print(
+        f"      Loaded {len(interests)} interest papers and {len(zotero_identity_papers)} Zotero items for dedup; "
+        f"explicit directions: {', '.join(config.get('explicit_interests', [])) or '(none)'}"
+    )
     debug_config = config.get("debug", {})
     if debug_config.get("list_zotero_items", False):
         debug_path = Path(debug_config.get("zotero_output", "zotero_library_debug.md"))
@@ -564,22 +731,34 @@ def main() -> int:
     if not seen_path.is_absolute():
         seen_path = args.config.resolve().parent / seen_path
     seen = set(load_json(seen_path, {"ids": []}).get("ids", []))
-    print(f"[2/7] Fetching CCF-A candidates: {len(requested)} venues × {len(config.get('years', [dt.date.today().year]))} years...")
+    dblp_config = resolve_dblp_config(config)
+    print(f"[2/7] Fetching CCF-A candidates with pagination: {len(requested)} venues × {len(config.get('years', [dt.date.today().year]))} years...")
     print(f"      Dedup history: {len(seen)} previously delivered paper IDs in {seen_path}")
     candidates: dict[str, dict[str, Any]] = {}
+    zotero_identities = build_zotero_identity_index(zotero_identity_papers)
     total_raw = 0
     for venue_index, key in enumerate(requested, 1):
         venue_total = 0
+        venue_pages = 0
         for year in config.get("years", [dt.date.today().year]):
-            papers = fetch_dblp(venue_by_key[key], int(year), int(config.get("per_venue", 30)), user_agent)
-            total_raw += len(papers)
+            papers, fetch_stats = fetch_dblp_incremental(
+                venue_by_key[key], int(year), dblp_config, user_agent, seen, zotero_identities
+            )
+            total_raw += fetch_stats["fetched"]
             venue_total += len(papers)
+            venue_pages += fetch_stats["pages"]
             for paper in papers:
                 candidates[paper["id"]] = paper
             time.sleep(float(config.get("request_delay_seconds", 1.0)))
-        print(f"      [{venue_index}/{len(requested)}] {venue_by_key[key]['abbr'] or key}: {venue_total} fetched")
+        print(f"      [{venue_index}/{len(requested)}] {venue_by_key[key]['abbr'] or key}: {venue_total} unseen from {venue_pages} pages")
     candidates, skipped_seen = filter_unseen(candidates, seen)
-    print(f"[3/7] Deduplicated candidates: {total_raw} fetched, {skipped_seen} already delivered, {len(candidates)} eligible")
+    candidates, zotero_skipped = filter_zotero_existing(candidates, zotero_identities)
+    print(
+        f"[3/7] Deduplicated candidates: {total_raw} source records, {skipped_seen} delivered, "
+        f"{sum(zotero_skipped.values())} already in Zotero "
+        f"(DOI={zotero_skipped['doi']}, ID={zotero_skipped['external_id']}, title={zotero_skipped['title']}), "
+        f"{len(candidates)} eligible"
+    )
     candidate_values = list(candidates.values())
     # A title-only first pass decides which candidates deserve metadata API calls.
     print("[4/7] Ranking by titles, Zotero corpus and explicit interests...")
@@ -629,6 +808,31 @@ def main() -> int:
         print("      Dedup history not updated because --no-update-seen was supplied")
     print(f"Done: wrote {len(selected)} recommendations from {len(candidates)} eligible candidates to {args.output}")
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=Path("config.json"))
+    parser.add_argument("--interests", type=Path, help="local JSON list; otherwise use Zotero Web API")
+    parser.add_argument("--venues", type=Path, default=Path(__file__).parent / "data/ccf_a_venues.json")
+    parser.add_argument("--output", type=Path, default=Path("recommendations.md"))
+    parser.add_argument("--no-update-seen", action="store_true")
+    parser.add_argument("--test-delivery", action="store_true", help="send one SMTP test message and exit without fetching or updating seen state")
+    args = parser.parse_args()
+    config = load_json(args.config)
+    if args.test_delivery:
+        smtp_config = config.get("delivery", {}).get("smtp", {})
+        subject = str(smtp_config.get("subject", "CCF Paper Scout") + " — SMTP test")
+        body = "CCF Paper Scout SMTP test\n\nThis message verifies SMTP configuration. No papers were fetched and seen state was not modified.\n"
+        if not send_email(subject, body, {**smtp_config, "enabled": True}):
+            raise RuntimeError("SMTP test delivery was not accepted")
+        print(f"SMTP test delivery accepted for {smtp_config.get('receiver', '(missing)')}")
+        return 0
+    lock_path = Path(config.get("run_lock", "state/paper_scout.lock"))
+    if not lock_path.is_absolute():
+        lock_path = args.config.resolve().parent / lock_path
+    with RunLock(lock_path):
+        return run_pipeline(args, config)
 
 
 if __name__ == "__main__":

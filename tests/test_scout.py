@@ -78,6 +78,90 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         sleep.assert_called_once_with(1)
 
+    def test_fetch_dblp_page_includes_start_offset(self):
+        venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
+        payload = {"result": {"hits": {"@total": "0", "hit": []}}}
+        with mock.patch.object(scout, "request_json", return_value=payload) as request_json:
+            page, total, raw_count = scout.fetch_dblp_page(venue, 2025, 100, 200, "test-agent")
+        self.assertEqual(page, [])
+        self.assertEqual(total, 0)
+        self.assertEqual(raw_count, 0)
+        self.assertIn("f=200", request_json.call_args.args[0])
+        self.assertIn("h=100", request_json.call_args.args[0])
+
+    def test_fetch_dblp_incremental_reaches_new_paper_on_later_page(self):
+        venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
+        old = lambda key: {"id": key, "title": key, "year": 2025}
+        pages = [
+            ([old("conf/nips/Old1"), old("conf/nips/Old2")], 5, 2),
+            ([old("conf/nips/Old3"), old("conf/nips/Old4")], 5, 2),
+            ([old("conf/nips/New5")], 5, 1),
+        ]
+        config = {"page_size": 2, "max_pages_per_venue": 3, "target_unseen_per_venue": 1, "stop_after_seen_pages": 3}
+        with mock.patch.object(scout, "fetch_dblp_page", side_effect=pages) as fetch_page:
+            papers, stats = scout.fetch_dblp_incremental(venue, 2025, config, "test-agent", {"conf/nips/Old1", "conf/nips/Old2", "conf/nips/Old3", "conf/nips/Old4"})
+        self.assertEqual([paper["id"] for paper in papers], ["conf/nips/New5"])
+        self.assertEqual(fetch_page.call_count, 3)
+        self.assertEqual(stats["pages"], 3)
+
+    def test_fetch_dblp_incremental_does_not_stop_before_later_unseen_page(self):
+        venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
+        old = lambda key: {"id": key, "title": key, "year": 2025}
+        pages = [
+            ([old("conf/nips/Old1")], 3, 1),
+            ([old("conf/nips/Old2")], 3, 1),
+            ([old("conf/nips/New3")], 3, 1),
+        ]
+        config = {"page_size": 1, "max_pages_per_venue": 3, "target_unseen_per_venue": 1, "stop_after_seen_pages": 1}
+        with mock.patch.object(scout, "fetch_dblp_page", side_effect=pages):
+            papers, stats = scout.fetch_dblp_incremental(venue, 2025, config, "test-agent", {"conf/nips/Old1", "conf/nips/Old2"})
+        self.assertEqual([paper["id"] for paper in papers], ["conf/nips/New3"])
+        self.assertEqual(stats["pages"], 3)
+
+    def test_fetch_dblp_incremental_ignores_zotero_existing_when_counting_target(self):
+        venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
+        pages = [
+            ([{"id": "conf/nips/ZoteroPaper", "title": "Already In Zotero", "year": 2025}], 2, 1),
+            ([{"id": "conf/nips/NewPaper", "title": "Actually New", "year": 2025}], 2, 1),
+        ]
+        config = {"page_size": 1, "max_pages_per_venue": 2, "target_unseen_per_venue": 1}
+        identities = {"dois": set(), "titles": {"already in zotero"}, "arxiv_ids": set(), "dblp_ids": set()}
+        with mock.patch.object(scout, "fetch_dblp_page", side_effect=pages):
+            papers, stats = scout.fetch_dblp_incremental(venue, 2025, config, "test-agent", set(), identities)
+        self.assertEqual([paper["id"] for paper in papers], ["conf/nips/NewPaper"])
+        self.assertEqual(stats["pages"], 2)
+
+    def test_fetch_dblp_incremental_continues_after_filtered_empty_page(self):
+        venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
+        pages = [
+            ([], 2, 1),
+            ([{"id": "conf/nips/New", "title": "New", "year": 2025}], 2, 1),
+        ]
+        config = {"page_size": 1, "max_pages_per_venue": 2, "target_unseen_per_venue": 1}
+        with mock.patch.object(scout, "fetch_dblp_page", side_effect=pages):
+            papers, stats = scout.fetch_dblp_incremental(venue, 2025, config, "test-agent", set())
+        self.assertEqual([paper["id"] for paper in papers], ["conf/nips/New"])
+        self.assertEqual(stats["pages"], 2)
+
+    def test_fetch_dblp_incremental_continues_when_total_is_unknown(self):
+        venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
+        pages = [
+            ([{"id": "conf/nips/A", "title": "A", "year": 2025}], None, 1),
+            ([{"id": "conf/nips/B", "title": "B", "year": 2025}], None, 1),
+            ([], None, 0),
+        ]
+        config = {"page_size": 1, "max_pages_per_venue": 3, "target_unseen_per_venue": 5}
+        with mock.patch.object(scout, "fetch_dblp_page", side_effect=pages) as fetch_page:
+            papers, stats = scout.fetch_dblp_incremental(venue, 2025, config, "test-agent", set())
+        self.assertEqual([paper["id"] for paper in papers], ["conf/nips/A", "conf/nips/B"])
+        self.assertEqual(fetch_page.call_count, 3)
+
+    def test_legacy_per_venue_maps_to_bounded_single_page(self):
+        resolved = scout.resolve_dblp_config({"per_venue": 17})
+        self.assertEqual(resolved["page_size"], 17)
+        self.assertEqual(resolved["target_unseen_per_venue"], 17)
+        self.assertEqual(resolved["max_pages_per_venue"], 1)
+
     def test_fetch_dblp_falls_back_to_uni_trier_mirror(self):
         venue = {"abbr": "NeurIPS", "dblp_key": "nips", "type": "conference", "name": "NeurIPS", "rank": "A"}
         payload = {"result": {"hits": {"hit": [{"info": {
@@ -107,6 +191,33 @@ class ScoutTests(unittest.TestCase):
         ranked = scout.rank_candidates(interests, candidates, ["reinforcement learning", "large language models", "autonomous agents"])
         self.assertEqual(ranked[0]["title"], "Autonomous LLM Agents with Reinforcement Learning")
         self.assertIn("reinforcement", ranked[0]["reasons"])
+
+    def test_zotero_identity_index_normalizes_doi_and_title(self):
+        interests = [{"title": "  ReAct: Synergizing Reasoning & Acting! ", "doi": "https://doi.org/10.1234/ABC.1", "url": "https://arxiv.org/abs/2210.03629", "extra": "DBLP: conf/iclr/ReAct23"}]
+        identities = scout.build_zotero_identity_index(interests)
+        self.assertIn("10.1234/abc.1", identities["dois"])
+        self.assertIn("react synergizing reasoning and acting", identities["titles"])
+        self.assertIn("2210.03629", identities["arxiv_ids"])
+        self.assertIn("conf/iclr/react23", identities["dblp_ids"])
+
+    def test_filter_zotero_existing_prefers_doi_then_title(self):
+        interests = [{"title": "A Comprehensive Study of Known Agent Paper", "doi": "10.1000/known"}]
+        candidates = {
+            "conf/nips/A": {"id": "conf/nips/A", "title": "Different title", "doi": "https://doi.org/10.1000/KNOWN"},
+            "conf/nips/B": {"id": "conf/nips/B", "title": "A Comprehensive Study of Known Agent Paper!", "doi": ""},
+            "conf/nips/C": {"id": "conf/nips/C", "title": "Novel Agent Paper", "doi": "10.1000/new"},
+        }
+        filtered, stats = scout.filter_zotero_existing(candidates, scout.build_zotero_identity_index(interests))
+        self.assertEqual(list(filtered), ["conf/nips/C"])
+        self.assertEqual(stats, {"doi": 1, "external_id": 0, "title": 1})
+
+    def test_generic_short_title_is_not_used_for_hard_dedup(self):
+        identities = scout.build_zotero_identity_index([{"title": "Introduction"}])
+        self.assertNotIn("introduction", identities["titles"])
+        candidates = {"p": {"id": "p", "title": "Introduction", "doi": ""}}
+        filtered, stats = scout.filter_zotero_existing(candidates, identities)
+        self.assertEqual(list(filtered), ["p"])
+        self.assertEqual(stats["title"], 0)
 
     def test_format_zotero_debug_lists_every_item(self):
         papers = [
@@ -165,6 +276,21 @@ class ScoutTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "2-5"):
             scout.validate_analysis_payload({**complete, "tags": ["only-one"]})
 
+    def test_run_lock_rejects_second_process(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "paper_scout.lock"
+            first = scout.RunLock(path)
+            first.__enter__()
+            try:
+                with self.assertRaisesRegex(RuntimeError, "another Paper Scout run is active"):
+                    with scout.RunLock(path):
+                        pass
+            finally:
+                first.__exit__(None, None, None)
+            with scout.RunLock(path):
+                self.assertTrue(path.exists())
+
     def test_atomic_write_text_replaces_complete_file(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
@@ -180,6 +306,19 @@ class ScoutTests(unittest.TestCase):
         self.assertFalse(scout.should_update_seen([{"id": "p1"}], True, False, False))
         self.assertFalse(scout.should_update_seen([], True, True, False))
         self.assertFalse(scout.should_update_seen([{"id": "p1"}], True, True, True))
+
+    def test_main_test_delivery_sends_without_pipeline(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = pathlib.Path(directory) / "config.json"
+            config_path.write_text(json.dumps({"delivery": {"smtp": {"host": "smtp.example.com", "sender": "a@example.com", "receiver": "b@example.com"}}}), encoding="utf-8")
+            with mock.patch.object(scout, "send_email", return_value=True) as send_email, \
+                 mock.patch.object(scout, "run_pipeline") as run_pipeline, \
+                 mock.patch.object(os.sys, "argv", ["paper_scout.py", "--config", str(config_path), "--test-delivery"]):
+                self.assertEqual(scout.main(), 0)
+            send_email.assert_called_once()
+            run_pipeline.assert_not_called()
+            self.assertFalse((pathlib.Path(directory) / "state" / "seen.json").exists())
 
     def test_send_email_uses_smtp_ssl_and_returns_success(self):
         config = {"enabled": True, "host": "smtp.example.com", "port": 465, "sender": "a@example.com", "receiver": "b@example.com", "password_env": "SMTP_PASSWORD", "use_ssl": True}
