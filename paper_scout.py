@@ -354,20 +354,29 @@ def fetch_dblp_incremental(
     consecutive_seen_pages = 0
     pages = 0
     fetched = 0
+    raw_hits = 0
+    delivered_skipped = 0
+    zotero_skipped = 0
     for page_index in range(max_pages):
         start = page_index * page_size
         page, total, raw_count = fetch_dblp_page(venue, year, page_size, start, user_agent)
         pages += 1
         fetched += len(page)
+        raw_hits += raw_count
         new_on_page = 0
         for paper in page:
             paper_id = paper["id"]
             if paper_id in all_ids:
                 continue
             all_ids.add(paper_id)
-            if paper_id not in seen and not filter_one_zotero_existing(paper, zotero_identities):
-                unseen.append(paper)
-                new_on_page += 1
+            if paper_id in seen:
+                delivered_skipped += 1
+                continue
+            if filter_one_zotero_existing(paper, zotero_identities):
+                zotero_skipped += 1
+                continue
+            unseen.append(paper)
+            new_on_page += 1
         consecutive_seen_pages = consecutive_seen_pages + 1 if new_on_page == 0 else 0
         if len(unseen) >= target_unseen:
             break
@@ -375,7 +384,10 @@ def fetch_dblp_incremental(
             break
         if consecutive_seen_pages >= stop_after_seen and unseen:
             break
-    return unseen, {"pages": pages, "fetched": fetched, "unseen": len(unseen)}
+    return unseen, {
+        "pages": pages, "fetched": fetched, "raw_hits": raw_hits, "unseen": len(unseen),
+        "delivered_skipped": delivered_skipped, "zotero_skipped": zotero_skipped,
+    }
 
 
 def fetch_dblp(venue: dict[str, Any], year: int, limit: int, user_agent: str) -> list[dict[str, Any]]:
@@ -737,6 +749,8 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     candidates: dict[str, dict[str, Any]] = {}
     zotero_identities = build_zotero_identity_index(zotero_identity_papers)
     total_raw = 0
+    skipped_seen = 0
+    zotero_skipped_count = 0
     for venue_index, key in enumerate(requested, 1):
         venue_total = 0
         venue_pages = 0
@@ -744,20 +758,18 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
             papers, fetch_stats = fetch_dblp_incremental(
                 venue_by_key[key], int(year), dblp_config, user_agent, seen, zotero_identities
             )
-            total_raw += fetch_stats["fetched"]
+            total_raw += fetch_stats["raw_hits"]
+            skipped_seen += fetch_stats["delivered_skipped"]
+            zotero_skipped_count += fetch_stats["zotero_skipped"]
             venue_total += len(papers)
             venue_pages += fetch_stats["pages"]
             for paper in papers:
                 candidates[paper["id"]] = paper
             time.sleep(float(config.get("request_delay_seconds", 1.0)))
         print(f"      [{venue_index}/{len(requested)}] {venue_by_key[key]['abbr'] or key}: {venue_total} unseen from {venue_pages} pages")
-    candidates, skipped_seen = filter_unseen(candidates, seen)
-    candidates, zotero_skipped = filter_zotero_existing(candidates, zotero_identities)
     print(
-        f"[3/7] Deduplicated candidates: {total_raw} source records, {skipped_seen} delivered, "
-        f"{sum(zotero_skipped.values())} already in Zotero "
-        f"(DOI={zotero_skipped['doi']}, ID={zotero_skipped['external_id']}, title={zotero_skipped['title']}), "
-        f"{len(candidates)} eligible"
+        f"[3/7] Deduplicated candidates: {total_raw} raw source hits, {skipped_seen} delivered, "
+        f"{zotero_skipped_count} already in Zotero, {len(candidates)} eligible"
     )
     candidate_values = list(candidates.values())
     # A title-only first pass decides which candidates deserve metadata API calls.
