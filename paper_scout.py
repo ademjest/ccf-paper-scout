@@ -15,6 +15,7 @@ import os
 import re
 import smtplib
 import ssl
+import state_store
 import sys
 import tempfile
 import time
@@ -133,6 +134,20 @@ def tokenize(text: str) -> list[str]:
     return [t.lower() for t in TOKEN_RE.findall(text) if t.lower() not in STOP and len(t) > 1]
 
 
+def merge_zotero_items(groups: list[list[dict[str, str]]], cap: int) -> list[dict[str, str]]:
+    papers: dict[str, dict[str, str]] = {}
+    for group in groups:
+        for paper in group:
+            identity = paper.get("key") or normalize_doi(paper.get("doi", "")) or normalize_title(paper.get("title", ""))
+            if not identity:
+                continue
+            current = papers.get(identity)
+            if current is None or paper.get("dateAdded", "") > current.get("dateAdded", ""):
+                papers[identity] = paper
+    values = sorted(papers.values(), key=lambda p: (p.get("dateAdded", ""), p.get("key", "")), reverse=True)
+    return values if cap <= 0 else values[:cap]
+
+
 def fetch_zotero(
     config: dict[str, Any], user_agent: str, *, cap_override: int | None = None,
     use_collection_filter: bool = True,
@@ -154,11 +169,12 @@ def fetch_zotero(
     else:
         urls.append(base + "?" + urllib.parse.urlencode(params))
     headers = {"User-Agent": user_agent, "Zotero-API-Key": api_key, "Accept": "application/json"}
-    papers: dict[str, dict[str, str]] = {}
+    groups: list[list[dict[str, str]]] = []
     cap = cap_override if cap_override is not None else int(config.get("recent_interest_items", 200))
     for initial in urls:
+        group: list[dict[str, str]] = []
         start = 0
-        while cap <= 0 or len(papers) < cap:
+        while True:
             url = initial + "&" + urllib.parse.urlencode({"start": start})
             req = urllib.request.Request(url, headers=headers)
             try:
@@ -178,7 +194,7 @@ def fetch_zotero(
                 data = item.get("data", {})
                 title = clean_text(data.get("title"))
                 if title:
-                    papers[item.get("key", title)] = {
+                    group.append({
                         "key": clean_text(item.get("key")),
                         "itemType": clean_text(data.get("itemType")),
                         "title": title,
@@ -187,12 +203,12 @@ def fetch_zotero(
                         "doi": clean_text(data.get("DOI")),
                         "url": clean_text(data.get("url")),
                         "extra": clean_text(data.get("extra")),
-                    }
+                    })
             if len(batch) < 100:
                 break
             start += len(batch)
-    values = sorted(papers.values(), key=lambda p: p.get("dateAdded", ""), reverse=True)
-    return values if cap <= 0 else values[:cap]
+        groups.append(group)
+    return merge_zotero_items(groups, cap)
 
 
 def normalize_doi(value: str) -> str:
@@ -512,6 +528,7 @@ def translate_papers(
     config: dict[str, Any],
     user_agent: str,
     cache_path: Path | None = None,
+    store: Any | None = None,
 ) -> tuple[int, int]:
     if not config.get("enabled", False):
         return 0, 0
@@ -528,6 +545,11 @@ def translate_papers(
     for paper in papers:
         cache_key = str(paper.get("id") or paper.get("title") or "")
         fingerprint = analysis_fingerprint(paper, config)
+        sqlite_cached = store.load_translation(cache_key, fingerprint) if store and cache_key else None
+        if sqlite_cached:
+            paper.update({key: value for key, value in sqlite_cached.items() if not key.startswith("_")})
+            cache_hits += 1
+            continue
         if cache_key in cache and cache[cache_key].get("_fingerprint") == fingerprint:
             paper.update({key: value for key, value in cache[cache_key].items() if not key.startswith("_")})
             cache_hits += 1
@@ -574,6 +596,8 @@ def translate_papers(
                 cache[cache_key]["tags"] = paper["tags"]
                 cache[cache_key]["_fingerprint"] = fingerprint
                 cache[cache_key]["_schema_version"] = ANALYSIS_SCHEMA_VERSION
+                if store:
+                    store.save_translation(cache_key, fingerprint, cache[cache_key])
                 if cache_path:
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
                     atomic_write_text(cache_path, json.dumps(cache, ensure_ascii=False, indent=2) + "\n")
@@ -743,6 +767,23 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     if not seen_path.is_absolute():
         seen_path = args.config.resolve().parent / seen_path
     seen = set(load_json(seen_path, {"ids": []}).get("ids", []))
+    state_path = Path(config.get("state_db", "state/paper_scout.sqlite3"))
+    if not state_path.is_absolute():
+        state_path = args.config.resolve().parent / state_path
+    store = state_store.StateStore(state_path)
+    store.migrate_legacy(seen_path, args.config.resolve().parent / "state/translations.json")
+    seen.update(store.delivered_ids())
+    run_id = store.start_run(hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest())
+    try:
+        return run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested)
+    except Exception as exc:
+        store.fail_run(run_id, str(exc))
+        raise
+    finally:
+        store.close()
+
+
+def run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested):
     dblp_config = resolve_dblp_config(config)
     print(f"[2/7] Fetching CCF-A candidates with pagination: {len(requested)} venues × {len(config.get('years', [dt.date.today().year]))} years...")
     print(f"      Dedup history: {len(seen)} previously delivered paper IDs in {seen_path}")
@@ -797,24 +838,42 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     translation_cache = Path(translation_config.get("cache", "state/translations.json"))
     if not translation_cache.is_absolute():
         translation_cache = args.config.resolve().parent / translation_cache
-    translated_count, translation_cache_hits = translate_papers(selected, translation_config, user_agent, translation_cache)
+    translated_count, translation_cache_hits = translate_papers(selected, translation_config, user_agent, translation_cache, store)
     if translation_config.get("enabled", False):
         print(f"      LLM translation: {translated_count} API successes, {translation_cache_hits} cache hits")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report = render_report(selected, len(interests), len(candidates))
     atomic_write_text(args.output, report)
+    store.record_selection(run_id, selected)
     delivery_config = config.get("delivery", {}).get("smtp", {})
     delivery_enabled = bool(delivery_config.get("enabled", False))
     delivered = False
     if delivery_enabled and selected:
         subject = delivery_config.get("subject", f"CCF Paper Scout Daily — {len(selected)} papers")
         print(f"      Delivering digest by SMTP to {delivery_config.get('receiver', '(missing)')}...")
-        delivered = send_email(str(subject), report, delivery_config)
+        try:
+            delivered = send_email(str(subject), report, delivery_config)
+        except Exception as exc:
+            store.finish_delivery(run_id, False, str(exc))
+            raise
         print("      SMTP delivery accepted")
+    if args.no_update_seen:
+        store.finish_run(run_id, "preview")
+    elif not selected:
+        store.finish_run(run_id, "no_candidates")
+    elif delivery_enabled:
+        store.finish_delivery(run_id, delivered, "accepted" if delivered else "SMTP failed")
+    else:
+        store.finish_run(run_id, "local_output")
+        with store.connection:
+            store.connection.execute("UPDATE recommendation_items SET state='delivered' WHERE run_id=?", (run_id,))
     if should_update_seen(selected, delivery_enabled, delivered, args.no_update_seen):
         seen.update(p["id"] for p in selected)
         seen_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(seen_path, json.dumps({"ids": sorted(seen)}, ensure_ascii=False, indent=2) + "\n")
+        try:
+            atomic_write_text(seen_path, json.dumps({"ids": sorted(seen)}, ensure_ascii=False, indent=2) + "\n")
+        except OSError as exc:
+            print(f"warning: SQLite delivery state committed but legacy seen.json mirror failed: {exc}", file=sys.stderr)
         print(f"      Updated dedup history: {len(seen)} paper IDs")
     elif args.no_update_seen:
         print("      Dedup history not updated because --no-update-seen was supplied")

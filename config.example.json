@@ -47,6 +47,7 @@
     }
   },
   "seen_db": "state/seen.json",
+  "state_db": "state/paper_scout.sqlite3",
   "run_lock": "state/paper_scout.lock",
   "request_delay_seconds": 1.0,
   "user_agent": "ccf-paper-scout/0.1 (personal research recommender)"

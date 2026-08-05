@@ -51,6 +51,19 @@ python3 paper_scout.py --config config.json --output recommendations.md
 - `zotero_collection_keys`：可选；只读取这些 Zotero collection key。
 - `seen_db`：已推荐记录，防止重复推送。加 `--no-update-seen` 可试跑而不更新。
 
+## 可安装 CLI 与状态库
+
+项目提供标准 Python 包配置。安装后可使用：
+
+```bash
+python -m pip install .
+ccf-paper-scout --help
+ccf-paper-scout doctor --config config.json
+ccf-paper-scout test-delivery --config config.json
+```
+
+`doctor` 检查配置、凭据是否存在（只显示长度，不显示值）、SMTP TLS 和状态目录。状态数据库默认位于 `state/paper_scout.sqlite3`，使用 SQLite WAL；首次运行会备份并迁移旧 `seen.json` 与翻译缓存。为兼容已有脚本，`python3 paper_scout.py` 暂时继续可用。
+
 ## Zotero 读取调试
 
 在 `config.json` 中启用：
