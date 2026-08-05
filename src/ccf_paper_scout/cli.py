@@ -53,7 +53,10 @@ def doctor(config_path: Path, network: bool = True) -> int:
             except OSError as exc:
                 print(f"smtp TLS: failed — {exc}")
                 failures += 1
-    state_dir = config_path.resolve().parent / "state"
+    state_path = Path(config.get("state_db", "state/paper_scout.sqlite3"))
+    if not state_path.is_absolute():
+        state_path = config_path.resolve().parent / state_path
+    state_dir = state_path.parent
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
         print(f"state path: writable ({state_dir})")

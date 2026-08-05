@@ -27,6 +27,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result, 7)
         legacy.assert_called_once()
 
+    def test_doctor_checks_configured_relative_state_db_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            path = root / "config.json"
+            path.write_text(json.dumps({
+                "years": [2026], "venue_keys": ["nips"], "max_results": 5,
+                "state_db": "custom/state.sqlite3"
+            }), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"ZOTERO_USER_ID": "1", "ZOTERO_API_KEY": "k"}, clear=True), \
+                 mock.patch("builtins.print") as output:
+                code = cli.main(["doctor", "--config", str(path), "--no-network"])
+            text = " ".join(" ".join(map(str, call.args)) for call in output.call_args_list)
+            self.assertEqual(code, 0)
+            self.assertIn(str(root / "custom"), text)
+            self.assertTrue((root / "custom").is_dir())
+
     def test_doctor_reports_missing_credentials_without_values(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "config.json"
