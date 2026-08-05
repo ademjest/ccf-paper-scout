@@ -32,6 +32,21 @@ class ScoutTests(unittest.TestCase):
         abstract = scout.openalex_abstract({"world": [1], "hello": [0]})
         self.assertEqual(abstract, "hello world")
 
+    def test_merge_zotero_collections_applies_cap_after_global_sort(self):
+        a = [{"key": "a-old", "title": "Old A", "dateAdded": "2025-01-01T00:00:00Z"}]
+        b = [{"key": "b-new", "title": "New B", "dateAdded": "2026-01-01T00:00:00Z"}]
+        merged = scout.merge_zotero_items([a, b], 1)
+        self.assertEqual([item["key"] for item in merged], ["b-new"])
+
+    def test_merge_zotero_collections_is_order_independent_and_deduplicates(self):
+        a = [{"key": "same", "title": "Paper", "dateAdded": "2025-01-01T00:00:00Z"}]
+        b = [{"key": "same", "title": "Paper", "dateAdded": "2025-01-01T00:00:00Z"},
+             {"key": "new", "title": "New", "dateAdded": "2026-01-01T00:00:00Z"}]
+        first = scout.merge_zotero_items([a, b], 10)
+        second = scout.merge_zotero_items([b, a], 10)
+        self.assertEqual([x["key"] for x in first], ["new", "same"])
+        self.assertEqual([x["key"] for x in second], ["new", "same"])
+
     def test_fetch_zotero_retries_temporary_dns_failure(self):
         response = mock.MagicMock()
         response.__enter__.return_value = response

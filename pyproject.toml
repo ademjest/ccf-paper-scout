@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ccf-paper-scout"
+version = "0.2.0"
+description = "Low-resource Zotero-driven CCF-A paper scout"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+authors = [{name = "ademjest"}]
+dependencies = []
+
+[project.scripts]
+ccf-paper-scout = "ccf_paper_scout.cli:main"
+
+[tool.setuptools]
+packages = ["ccf_paper_scout"]
+py-modules = ["paper_scout", "state_store"]
+package-dir = {"ccf_paper_scout" = "src/ccf_paper_scout"}
+
+[tool.setuptools.package-data]
+ccf_paper_scout = ["data/*.json"]

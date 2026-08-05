@@ -20,7 +20,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile
-        run: python -m py_compile paper_scout.py tests/test_scout.py scripts/validate_repo.py
+        run: python -m py_compile paper_scout.py state_store.py src/ccf_paper_scout/*.py tests/*.py
+      - name: Package and CLI smoke test
+        run: |
+          python -m pip install .
+          ccf-paper-scout --help
+          ccf-paper-scout doctor --config config.example.json --no-network || test $? -eq 2
       - name: Unit tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Repository validation
