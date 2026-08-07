@@ -38,6 +38,17 @@ class ActionsConfigTests(unittest.TestCase):
             self.assertNotIn("sender-password-value", text)
             self.assertNotIn("llm-api-key-value", text)
 
+    def test_build_rejects_out_of_range_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory) / "base.json"
+            base.write_text(json.dumps({"years": [2026], "venue_keys": []}), encoding="utf-8")
+            env = {"SMTP_SENDER": "s@qq.com", "SMTP_RECEIVER": "r@example.com",
+                   "LLM_BASE_URL": "https://llm.example/v1", "LLM_MODEL": "m"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                for value in (-1, 0, 21):
+                    with self.assertRaisesRegex(ValueError, "1..20"):
+                        build_actions_config.build(base, pathlib.Path(directory) / "out.json", pathlib.Path("state"), value)
+
     def test_build_fails_when_public_runtime_values_are_missing(self):
         with tempfile.TemporaryDirectory() as directory:
             base = pathlib.Path(directory) / "base.json"

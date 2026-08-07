@@ -18,7 +18,11 @@ def prepare(root: Path) -> None:
 
 
 def verify(root: Path) -> None:
-    unexpected = sorted(p.name for p in root.iterdir() if p.name not in ALLOWED)
+    unexpected = []
+    for path in root.iterdir():
+        if path.name not in ALLOWED or path.is_symlink() or not path.is_file():
+            unexpected.append(path.name)
+    unexpected.sort()
     if unexpected:
         raise RuntimeError("unexpected state entries: " + ", ".join(unexpected))
     db = root / "paper_scout.sqlite3"

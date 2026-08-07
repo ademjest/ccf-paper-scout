@@ -16,17 +16,6 @@ jobs:
   deliver:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
-      ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      SMTP_SENDER: ${{ secrets.SMTP_SENDER }}
-      SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
-      STATE_REPO: ${{ vars.STATE_REPO }}
-      STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +23,9 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install .
       - name: Restore private state
+        env:
+          STATE_REPO: ${{ vars.STATE_REPO }}
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         run: |
           basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
           git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" clone "https://github.com/${STATE_REPO}.git" .runtime-state
@@ -41,8 +33,17 @@ jobs:
           python scripts/actions_state.py prepare --dir .runtime-state/state
           python scripts/actions_state.py verify --dir .runtime-state/state
       - name: Build ephemeral config
+        env:
+          SMTP_SENDER: ${{ secrets.SMTP_SENDER }}
+          SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
         run: python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results 20
       - name: Doctor
+        env:
+          ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
+          ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: ccf-paper-scout doctor --config config.action.json
       - name: Check unresolved delivery transaction
         run: |
@@ -51,6 +52,8 @@ jobs:
             exit 3
           fi
       - name: Mark delivery pending in private state
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         working-directory: .runtime-state
         run: |
           printf 'run_id=%s\ncreated_at=%s\n' "$GITHUB_RUN_ID" "$(date -u +'%FT%TZ')" > state/.delivery-pending
@@ -61,9 +64,16 @@ jobs:
           basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
           git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
       - name: Deliver daily digest
+        env:
+          ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
+          ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: ccf-paper-scout run --config config.action.json --output recommendations.md
       - name: Persist state immediately after delivery
         if: success()
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         working-directory: .runtime-state
         run: |
           python ../scripts/actions_state.py checkpoint --dir state
@@ -76,11 +86,3 @@ jobs:
             basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
             git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
           fi
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: paper-scout-daily-${{ github.run_id }}
-          path: recommendations.md
-          if-no-files-found: ignore
-          retention-days: 7

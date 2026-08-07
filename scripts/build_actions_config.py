@@ -9,6 +9,8 @@ from pathlib import Path
 
 
 def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enabled: bool = True) -> None:
+    if not 1 <= max_results <= 20:
+        raise ValueError("max_results must be 1..20")
     required = ("SMTP_SENDER", "SMTP_RECEIVER", "LLM_BASE_URL", "LLM_MODEL")
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
