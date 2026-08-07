@@ -3,6 +3,8 @@ __pycache__/
 config.json
 state/
 .env.local
+config.action.json
+.runtime-state/
 recommendations*.md
 zotero_library_debug.md
 *.log

@@ -64,6 +64,21 @@ ccf-paper-scout test-delivery --config config.json
 
 `doctor` 检查配置、凭据是否存在（只显示长度，不显示值）、SMTP TLS 和状态目录。状态数据库默认位于 `state/paper_scout.sqlite3`，使用 SQLite WAL；首次运行会备份并迁移旧 `seen.json` 与翻译缓存。为兼容已有脚本，`python3 paper_scout.py` 暂时继续可用。
 
+## GitHub Actions 云端部署
+
+项目提供两套远程工作流：
+
+- `Paper Scout Manual`：依次支持 `doctor`、`smtp-test`、`preview` 和 `production` 验收。
+- `Paper Scout Daily`：每天 UTC 01:00（北京时间 09:00）运行一次。
+
+跨日状态保存在独立私有仓库，通过 `STATE_REPO_TOKEN` 恢复和提交；不要把 SQLite、阅读历史或凭据放入公开代码仓库。完整部署与 Secrets 清单见：
+
+```text
+.hermes/plans/2026-08-05_120000-github-actions-deployment.md
+```
+
+云端 production 验收通过前保留本机 cron；通过后必须停用本机 cron，避免重复邮件。
+
 ## Zotero 读取调试
 
 在 `config.json` 中启用：
