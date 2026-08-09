@@ -1,6 +1,6 @@
 {
   "years": [2026, 2025],
-  "venue_keys": ["nips", "icml", "cvpr", "iccv", "aaai", "ijcai", "acl", "sigir", "kdd"],
+  "venue_keys": ["nips", "icml", "cvpr", "iccv", "aaai", "acl", "sigir", "kdd"],
   "dblp": {
     "page_size": 100,
     "max_pages_per_venue": 5,
