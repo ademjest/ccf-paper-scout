@@ -73,7 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.add_argument("--config", type=Path, default=Path("config.json"))
     doctor_parser.add_argument("--no-network", action="store_true")
     run_parser = sub.add_parser("run", add_help=False)
-    run_parser.add_argument("args", nargs=argparse.REMAINDER)
     delivery_parser = sub.add_parser("test-delivery")
     delivery_parser.add_argument("--config", type=Path, default=Path("config.json"))
     return parser
@@ -83,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args(argv)
     if args.command == "run":
-        args.args.extend(unknown)
+        args.args = list(unknown)
     elif unknown:
         parser.error("unrecognized arguments: " + " ".join(unknown))
     if args.command == "doctor":
