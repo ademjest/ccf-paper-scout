@@ -63,11 +63,13 @@ LLM 不参与 CCF-A 资格判断和核心排序。它只处理最终选中的标
 
 ## 快速开始
 
-要求 Python 3.11+。项目默认仅使用 Python 标准库。
+要求 Python 3.11+。项目默认仅使用 Python 标准库。建议使用虚拟环境，避免现代 Linux 发行版的 externally-managed Python 限制。
 
 ```bash
 git clone https://github.com/ademjest/ccf-paper-scout.git
 cd ccf-paper-scout
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install .
 cp config.example.json config.json
 ```
@@ -228,13 +230,23 @@ state/translations.json
 
 不要把状态仓库设为公开。SQLite、历史推荐和翻译缓存可能反映个人研究兴趣。
 
-初始化建议结构：
+私有状态仓库只需要一个初始提交，workflow 会在首次正式运行时创建 `state/` 和 SQLite。最小结构可以是：
 
 ```text
 README.md
 .gitignore
-state/
 ```
+
+建议 `.gitignore` 内容：
+
+```gitignore
+state/*.lock
+state/*.sqlite3-wal
+state/*.sqlite3-shm
+state/*.bak
+```
+
+如果需要迁移已有历史，也可以预先提交 `state/seen.json` 和 `state/translations.json`，但不要提交凭据、报告或调试日志。
 
 ### 6. 创建状态仓库访问令牌
 
@@ -308,10 +320,10 @@ Actions
 
 依次运行：
 
-1. `doctor`：只检查当前生成的配置所需项。注意，云端配置生成器默认启用 LLM 和 SMTP，因此即使选择 `doctor`，也要先配置 `SMTP_SENDER`、`SMTP_RECEIVER`、`LLM_BASE_URL` 和 `LLM_MODEL`；`doctor` 还会检查 Zotero 凭据和 SMTP 授权码是否存在，并测试 SMTP TLS；
-2. `smtp-test`：只发送一封测试邮件，不抓取论文、不修改状态；
-3. `preview`：恢复私有状态、读取 Zotero、检索论文并生成推荐报告，不发送邮件、不更新去重状态；
-4. `production`：建议先设 `max_results=1`，确认正式邮件、SQLite 和状态提交都正常。
+1. `doctor`：只检查当前生成的配置所需项。注意，云端配置生成器默认启用 LLM 和 SMTP，因此即使选择 `doctor`，也要先配置 `SMTP_SENDER`、`SMTP_RECEIVER`、`LLM_BASE_URL` 和 `LLM_MODEL`；`doctor` 会确认 Zotero 凭据和 SMTP 授权码是否存在，并测试 SMTP TLS，但不会调用 Zotero 验证账号、API Key 或文库权限，也不会验证 `LLM_API_KEY`；
+2. `smtp-test`：只发送一封测试邮件，不抓取论文、不修改状态。成功信号是 `SMTP test delivery accepted`，并且收件箱实际收到测试邮件；
+3. `preview`：恢复私有状态、读取 Zotero、检索论文并生成推荐报告，不发送邮件、不更新去重状态。`Restore private state` 和 `Preview` 步骤都应成功；这一步会实际验证 Zotero 访问。LLM 认证失败目前只会产生逐篇 warning，因此还要在日志中检查 `LLM translation` 的成功数或 warning；
+4. `production`：建议先设 `max_results=1`。成功信号包括 `SMTP delivery accepted`、`Actions state checkpoint completed`，以及私有状态仓库新增最终状态提交。
 
 按上述顺序执行可以更容易定位配置、邮件、数据读取和状态持久化问题。`production` 会发送真实邮件并修改私有状态。
 
