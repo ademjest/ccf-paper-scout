@@ -27,6 +27,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result, 7)
         legacy.assert_called_once()
 
+    def test_run_preserves_legacy_argument_order(self):
+        captured = []
+
+        def legacy_main():
+            captured.extend(sys.argv[1:])
+            return 0
+
+        with mock.patch("paper_scout.main", side_effect=legacy_main), \
+             mock.patch.object(sys, "argv", ["ccf-paper-scout"]):
+            result = cli.main(["run", "--config", "foo.json", "--output", "out.md", "--no-update-seen"])
+        self.assertEqual(result, 0)
+        config_index = captured.index("--config")
+        self.assertEqual(captured[config_index + 1], "foo.json")
+        output_index = captured.index("--output")
+        self.assertEqual(captured[output_index + 1], "out.md")
+
     def test_doctor_checks_configured_relative_state_db_parent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
