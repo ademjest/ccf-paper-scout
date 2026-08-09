@@ -775,7 +775,7 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     seen.update(store.delivered_ids())
     run_id = store.start_run(hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest())
     try:
-        return run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested)
+        return run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested, venue_by_key)
     except Exception as exc:
         store.fail_run(run_id, str(exc))
         raise
@@ -783,7 +783,7 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
         store.close()
 
 
-def run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested):
+def run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested, venue_by_key):
     dblp_config = resolve_dblp_config(config)
     print(f"[2/7] Fetching CCF-A candidates with pagination: {len(requested)} venues × {len(config.get('years', [dt.date.today().year]))} years...")
     print(f"      Dedup history: {len(seen)} previously delivered paper IDs in {seen_path}")

@@ -3,6 +3,7 @@ import http.client
 import json
 import os
 import pathlib
+import inspect
 import unittest
 import urllib.error
 from unittest import mock
@@ -32,7 +33,11 @@ class ScoutTests(unittest.TestCase):
         abstract = scout.openalex_abstract({"world": [1], "hello": [0]})
         self.assertEqual(abstract, "hello world")
 
-    def test_merge_zotero_collections_applies_cap_after_global_sort(self):
+    def test_run_pipeline_body_accepts_explicit_venue_map(self):
+        parameters = inspect.signature(scout.run_pipeline_body).parameters
+        self.assertIn("venue_by_key", parameters)
+
+    def test_multi_collection_cap_is_applied_after_global_sort(self):
         a = [{"key": "a-old", "title": "Old A", "dateAdded": "2025-01-01T00:00:00Z"}]
         b = [{"key": "b-new", "title": "New B", "dateAdded": "2026-01-01T00:00:00Z"}]
         merged = scout.merge_zotero_items([a, b], 1)
