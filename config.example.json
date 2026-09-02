@@ -1,0 +1,65 @@
+{
+  "years": [2026, 2025],
+  "venue_keys": ["nips", "icml", "cvpr", "iccv", "aaai", "acl", "sigir", "kdd"],
+  "dblp": {
+    "page_size": 100,
+    "max_pages_per_venue": 5,
+    "target_unseen_per_venue": 30,
+    "stop_after_seen_pages": 2,
+    "failure_policy": "continue",
+    "minimum_success_ratio": 0.75
+  },
+  "max_results": 10,
+  "min_score": 0.01,
+  "explicit_interests": [
+    "reinforcement learning",
+    "multi-agent reinforcement learning",
+    "LLM-assisted reinforcement learning"
+  ],
+  "topic_priority": {
+    "primary_topics": [
+      "reinforcement learning",
+      "multi-agent reinforcement learning",
+      "LLM-assisted reinforcement learning"
+    ],
+    "exploration_topics": ["LLM agents"],
+    "primary_topic_boost": 2.0,
+    "exploration_topic_boost": 0.2,
+    "max_exploration_results": 1
+  },
+  "openalex_enrich_limit": 60,
+  "recent_interest_items": 200,
+  "zotero_dedup_items": 0,
+  "zotero_collection_keys": [],
+  "debug": {
+    "list_zotero_items": false,
+    "zotero_output": "zotero_library_debug.md"
+  },
+  "llm_translation": {
+    "enabled": false,
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "api_key_env": "LLM_API_KEY",
+    "language": "简体中文",
+    "timeout_seconds": 90,
+    "cache": "state/translations.json"
+  },
+  "delivery": {
+    "smtp": {
+      "enabled": false,
+      "host": "smtp.example.com",
+      "port": 465,
+      "use_ssl": true,
+      "sender": "sender@example.com",
+      "receiver": "receiver@example.com",
+      "password_env": "SMTP_PASSWORD",
+      "subject": "CCF Paper Scout 每日论文推荐",
+      "timeout_seconds": 60
+    }
+  },
+  "seen_db": "state/seen.json",
+  "state_db": "state/paper_scout.sqlite3",
+  "run_lock": "state/paper_scout.lock",
+  "request_delay_seconds": 2.0,
+  "user_agent": "ccf-paper-scout/0.1 (personal research recommender)"
+}

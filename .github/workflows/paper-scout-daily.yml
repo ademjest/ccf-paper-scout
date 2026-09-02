@@ -1,0 +1,97 @@
+name: Paper Scout Daily
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '55 0 * * *' # start slightly early; application gates SMTP until 09:00 Asia/Shanghai
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-scout-production
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install .
+      - name: Restore private state
+        env:
+          STATE_REPO: ${{ vars.STATE_REPO }}
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+        run: |
+          basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" clone "https://github.com/${STATE_REPO}.git" .runtime-state
+          git -C .runtime-state remote set-url origin "https://github.com/${STATE_REPO}.git"
+          python scripts/actions_state.py prepare --dir .runtime-state/state
+          python scripts/actions_state.py verify --dir .runtime-state/state
+      - name: Build ephemeral config
+        env:
+          SMTP_SENDER: ${{ secrets.SMTP_SENDER }}
+          SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results 10
+      - name: Verify generated runtime config
+        run: |
+          python -c 'import json; value=json.load(open("config.action.json"))["max_results"]; assert value == 10; print("Runtime max_results:", value)'
+      - name: Doctor
+        env:
+          ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
+          ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: ccf-paper-scout doctor --config config.action.json
+      - name: Check unresolved delivery transaction
+        run: |
+          if [ -f .runtime-state/state/.delivery-pending ]; then
+            echo "Unresolved prior delivery exists; inspect the previous Actions run and private state before retrying."
+            exit 3
+          fi
+      - name: Deliver daily digest
+        env:
+          ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
+          ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+          PAPER_SCOUT_DELIVERY_GATE: .runtime-state/state/.delivery-approved
+          PAPER_SCOUT_SCHEDULED_RUN: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          PAPER_SCOUT_TIMEZONE: Asia/Shanghai
+          PAPER_SCOUT_DELIVERY_TIME: '09:00'
+          PAPER_SCOUT_MAX_LATE_SECONDS: '3600'
+        run: |
+          ccf-paper-scout run --config config.action.json --output recommendations.md & scout_pid=$!
+          while [ ! -f .runtime-state/state/.delivery-pending ] && kill -0 "$scout_pid" 2>/dev/null; do sleep 1; done
+          if [ -f .runtime-state/state/.delivery-pending ]; then
+            git -C .runtime-state config user.name "github-actions[bot]"
+            git -C .runtime-state config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C .runtime-state add state/.delivery-pending
+            git -C .runtime-state commit -m "state: pending delivery ${GITHUB_RUN_ID}"
+            basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
+            git -C .runtime-state -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
+            touch .runtime-state/state/.delivery-approved
+          fi
+          wait "$scout_pid"
+      - name: Persist state immediately after delivery
+        if: always()
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+        working-directory: .runtime-state
+        run: |
+          python ../scripts/actions_state.py checkpoint --dir state
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state
+          if ! git diff --cached --quiet; then
+            git commit -m "state: paper scout run ${GITHUB_RUN_ID}"
+            basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
+            git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
+          fi
