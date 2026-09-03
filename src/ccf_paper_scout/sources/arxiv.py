@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 import urllib.parse
 import urllib.request
 import time
+from email.utils import parsedate_to_datetime
 
 from ..identity import canonical_key
 from ..models import Paper, SourceEvidence
@@ -103,7 +104,16 @@ class ArxivSource:
                 if exc.code not in (429, 500, 502, 503, 504) or attempt + 1 >= attempts:
                     raise
                 retry_after = exc.headers.get("Retry-After") if exc.headers else None
-                time.sleep(float(retry_after) if retry_after else delay * (2 ** attempt))
+                wait = delay * (2 ** attempt)
+                if retry_after:
+                    try:
+                        wait = float(retry_after)
+                    except ValueError:
+                        retry_at = parsedate_to_datetime(retry_after)
+                        if retry_at.tzinfo is None:
+                            retry_at = retry_at.replace(tzinfo=dt.timezone.utc)
+                        wait = max(0.0, (retry_at - dt.datetime.now(dt.timezone.utc)).total_seconds())
+                time.sleep(wait)
             except (OSError, TimeoutError):
                 if attempt + 1 >= attempts:
                     raise

@@ -26,7 +26,7 @@ def doctor(config_path: Path, network: bool = True) -> int:
     failures = 0
     try:
         config = load_config(config_path)
-        print(f"config: ok ({config_path})")
+        print("config: ok")
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"config: failed — {exc}")
         return 2
@@ -66,7 +66,7 @@ def doctor(config_path: Path, network: bool = True) -> int:
     state_dir = state_path.parent
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
-        print(f"state path: writable ({state_dir})")
+        print("state path: writable")
     except OSError as exc:
         print(f"state path: failed — {exc}")
         failures += 1

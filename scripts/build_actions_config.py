@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import math
 from pathlib import Path
 
 PROFILE_KEYS = {"version", "sources", "domains", "primary", "exploration", "digest", "eligibility"}
@@ -105,6 +106,10 @@ def load_profile(raw: str) -> dict[str, object]:
         for key, bounds in schema["integers"].items():
             if key in source and (not isinstance(source[key], int) or isinstance(source[key], bool) or not bounds[0] <= source[key] <= bounds[1]):
                 raise ValueError(f"profile.sources.{source_name}.{key} must be an integer in {bounds[0]}..{bounds[1]}")
+        if source_name == "dblp" and "minimum_success_ratio" in source:
+            ratio = source["minimum_success_ratio"]
+            if not isinstance(ratio, (int, float)) or isinstance(ratio, bool) or not math.isfinite(float(ratio)) or not 0 <= float(ratio) <= 1:
+                raise ValueError("profile.sources.dblp.minimum_success_ratio must be finite numeric in 0..1")
         if "request_delay_seconds" in source and (not isinstance(source["request_delay_seconds"], (int, float)) or isinstance(source["request_delay_seconds"], bool) or not 3 <= source["request_delay_seconds"] <= 60):
             raise ValueError("profile.sources.arxiv.request_delay_seconds must be numeric in 3..60")
     if "quotas" in digest:
