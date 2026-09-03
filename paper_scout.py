@@ -820,28 +820,32 @@ def wait_for_delivery_gate(path: Path, timeout_seconds: int) -> None:
     path.unlink()
 
 
-def delivery_not_before_delay(now: dt.datetime, timezone_name: str, target_hhmm: str, max_late_seconds: int) -> int:
+def delivery_timing(now: dt.datetime, timezone_name: str, target_hhmm: str) -> dict[str, Any]:
     local_now = now.astimezone(ZoneInfo(timezone_name))
     hour, minute = (int(part) for part in target_hhmm.split(":"))
     target = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     delta = (target - local_now).total_seconds()
-    if delta < -max_late_seconds:
-        raise RuntimeError(
-            f"delivery window missed: current={local_now.isoformat(timespec='seconds')} "
-            f"target={target.isoformat(timespec='seconds')} max_late_seconds={max_late_seconds}"
-        )
-    return max(0, math.ceil(delta))
+    return {
+        "wait_seconds": max(0, math.ceil(delta)),
+        "late_seconds": max(0, math.floor(-delta)),
+        "current": local_now.isoformat(timespec="seconds"),
+        "target": target.isoformat(timespec="seconds"),
+    }
 
 
 def maybe_wait_for_delivery_schedule(env: dict[str, str] | None = None) -> int:
     env = os.environ if env is None else env
     if env.get("PAPER_SCOUT_SCHEDULED_RUN") != "true":
         return 0
-    delay = delivery_not_before_delay(
+    timing = delivery_timing(
         dt.datetime.now(dt.timezone.utc),
         env.get("PAPER_SCOUT_TIMEZONE", "Asia/Shanghai"),
         env.get("PAPER_SCOUT_DELIVERY_TIME", "09:00"),
-        int(env.get("PAPER_SCOUT_MAX_LATE_SECONDS", "3600")),
+    )
+    delay = int(timing["wait_seconds"])
+    print(
+        f"      schedule_target={timing['target']} delivery_ready={timing['current']} "
+        f"delivery_late_seconds={timing['late_seconds']} delivery_policy=send_as_soon_as_ready"
     )
     if delay:
         print(f"      Waiting {delay}s for configured delivery time before SMTP...")
