@@ -5,6 +5,7 @@ import re
 import xml.etree.ElementTree as ET
 import urllib.parse
 import urllib.request
+import time
 
 from ..identity import canonical_key
 from ..models import Paper, SourceEvidence
@@ -59,7 +60,8 @@ def parse_arxiv_atom(xml_text: str, *, reject_withdrawn: bool = True) -> list[Pa
             publication_status=status, publication_year=int(_text(entry, "a:published")[:4] or 0) or None,
             identifiers=identifiers, sources=[SourceEvidence("arxiv", arxiv_id, "author-preprint", raw_id)],
             categories=categories, primary_category=primary_category, source_version=version,
-            updated_at=_text(entry, "a:updated"), url=f"https://arxiv.org/abs/{arxiv_id}", pdf_url=pdf,
+            updated_at=_text(entry, "a:updated"), published_at=_text(entry, "a:published"),
+            url=f"https://arxiv.org/abs/{arxiv_id}", pdf_url=pdf,
             channel="preprint",
         ))
     return papers
@@ -88,8 +90,24 @@ class ArxivSource:
             "https://export.arxiv.org/api/query?" + params,
             headers={"User-Agent": str(request.get("user_agent", "ccf-paper-scout/0.3"))},
         )
-        with urllib.request.urlopen(req, timeout=int(request.get("timeout_seconds", 60))) as response:
-            text = response.read().decode("utf-8")
+        attempts = int(request.get("max_attempts", 3))
+        delay = float(request.get("request_delay_seconds", 3.0))
+        for attempt in range(attempts):
+            if cursor is not None and delay > 0:
+                time.sleep(delay)
+            try:
+                with urllib.request.urlopen(req, timeout=int(request.get("timeout_seconds", 60))) as response:
+                    text = response.read().decode("utf-8")
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code not in (429, 500, 502, 503, 504) or attempt + 1 >= attempts:
+                    raise
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                time.sleep(float(retry_after) if retry_after else delay * (2 ** attempt))
+            except (OSError, TimeoutError):
+                if attempt + 1 >= attempts:
+                    raise
+                time.sleep(delay * (2 ** attempt))
         root = ET.fromstring(text)
         raw_count = len(root.findall("a:entry", NS))
         records = parse_arxiv_atom(text, reject_withdrawn=bool(request.get("reject_withdrawn", True)))
@@ -99,10 +117,10 @@ class ArxivSource:
             filtered: list[Paper] = []
             for paper in records:
                 try:
-                    updated = dt.datetime.fromisoformat(paper.updated_at.replace("Z", "+00:00"))
+                    submitted = dt.datetime.fromisoformat(paper.published_at.replace("Z", "+00:00"))
                 except ValueError:
                     continue
-                if updated >= cutoff:
+                if submitted >= cutoff:
                     filtered.append(paper)
             records = filtered
         next_cursor = str(start + raw_count) if raw_count == page_size else None

@@ -473,7 +473,8 @@ def collect_dblp_sources(
             try:
                 papers, fetched = fetch_dblp_incremental(venue, int(year), config, user_agent, seen, zotero_identities)
             except RuntimeError as exc:
-                print(f"source=DBLP venue={venue.get('abbr') or key} year={year} status=failed error={exc}", file=sys.stderr)
+                if config.get("debug_source_details", False):
+                    print(f"source=DBLP venue={venue.get('abbr') or key} year={year} status=failed error_type={type(exc).__name__}", file=sys.stderr)
                 failures.append({"venue": venue.get("abbr") or key, "year": int(year), "error": str(exc)})
                 if policy == "strict":
                     raise
@@ -483,7 +484,8 @@ def collect_dblp_sources(
                 stats[name] += fetched[name]
             for paper in papers:
                 candidates[paper["id"]] = paper
-            print(f"source=DBLP venue={venue.get('abbr') or key} year={year} status=success pages={fetched['pages']} unseen={len(papers)}")
+            if config.get("debug_source_details", False):
+                print(f"source=DBLP venue_slot status=success pages={fetched['pages']} unseen={len(papers)}")
     stats["success_ratio"] = successes / total if total else 1.0
     if stats["success_ratio"] < minimum:
         raise RuntimeError(f"DBLP success ratio {stats['success_ratio']:.3f} below minimum {minimum:.3f}")
@@ -1159,8 +1161,8 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
 def run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested, venue_by_key):
     dblp_config = resolve_dblp_config(config)
     dblp_config.setdefault("request_delay_seconds", config.get("request_delay_seconds", 1.0))
-    print(f"[2/7] Fetching CCF-A candidates with pagination: {len(requested)} venues × {len(config.get('years', [dt.date.today().year]))} years...")
-    print(f"      Dedup history: {len(seen)} previously delivered paper IDs in {seen_path}")
+    print("[2/7] Fetching candidates from profile-enabled sources...")
+    print(f"      Dedup history contains {len(seen)} delivered identity aliases")
     zotero_identities = build_zotero_identity_index(zotero_identity_papers)
     if dblp_enabled(config):
         candidates, source_stats, failed_sources = collect_dblp_sources(

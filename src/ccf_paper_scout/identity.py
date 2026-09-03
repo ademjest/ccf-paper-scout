@@ -62,14 +62,26 @@ def merge_papers(papers: Iterable[Paper]) -> list[Paper]:
     alias_to_paper: dict[str, Paper] = {}
     for paper in papers:
         aliases = _identity_aliases(paper)
-        current = next((alias_to_paper[alias] for alias in aliases if alias in alias_to_paper), None)
-        if current is None:
+        matches: list[Paper] = []
+        for alias in aliases:
+            match = alias_to_paper.get(alias)
+            if match is not None and all(match is not existing for existing in matches):
+                matches.append(match)
+        if not matches:
             paper.canonical_id = canonical_key(paper.identifiers) or paper.canonical_id
             merged.append(paper)
             current = paper
         else:
+            current = matches[0]
             _combine(current, paper)
+            for duplicate in matches[1:]:
+                _combine(current, duplicate)
+                if duplicate in merged:
+                    merged.remove(duplicate)
             current.canonical_id = canonical_key(current.identifiers) or current.canonical_id
-        for alias in _identity_aliases(current) | aliases:
+        current_aliases = _identity_aliases(current) | aliases
+        for duplicate in matches[1:]:
+            current_aliases |= _identity_aliases(duplicate)
+        for alias in current_aliases:
             alias_to_paper[alias] = current
     return merged

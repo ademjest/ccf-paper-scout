@@ -30,6 +30,7 @@ class Paper:
     source_version: str = ""
     first_seen_at: str = ""
     updated_at: str = ""
+    published_at: str = ""
     url: str = ""
     pdf_url: str = ""
     score: float = 0.0

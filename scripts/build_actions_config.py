@@ -11,6 +11,21 @@ PROFILE_KEYS = {"version", "sources", "domains", "primary", "exploration", "dige
 SOURCE_KEYS = {"years", "venue_keys", "zotero_collection_keys", "recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit", "dblp", "arxiv", "ieee_xplore"}
 DIGEST_KEYS = {"min_score", "primary_topic_boost", "exploration_topic_boost", "max_exploration_results", "quotas"}
 CREDENTIAL_KEY_PARTS = {"password", "passwd", "secret", "token", "credential", "authorization", "auth"}
+SOURCE_SCHEMAS = {
+    "dblp": {
+        "allowed": {"enabled", "page_size", "max_pages_per_venue", "target_unseen_per_venue", "stop_after_seen_pages", "failure_policy", "minimum_success_ratio"},
+        "integers": {"page_size": (1, 1000), "max_pages_per_venue": (1, 20), "target_unseen_per_venue": (1, 1000), "stop_after_seen_pages": (1, 20)},
+    },
+    "arxiv": {
+        "allowed": {"enabled", "categories", "page_size", "max_pages", "max_age_days", "request_delay_seconds", "timeout_seconds", "max_attempts", "failure_policy", "reject_withdrawn"},
+        "integers": {"page_size": (1, 100), "max_pages": (1, 20), "max_age_days": (1, 3650), "timeout_seconds": (1, 300), "max_attempts": (1, 5)},
+    },
+    "ieee_xplore": {
+        "allowed": {"enabled", "page_size", "max_pages", "timeout_seconds", "failure_policy"},
+        "integers": {"page_size": (1, 200), "max_pages": (1, 20), "timeout_seconds": (1, 300)},
+    },
+}
+KNOWN_CHANNELS = {"formal", "formal_control", "preprint", "exploration"}
 
 
 def _reject_credential_keys(value: object, path: str = "profile") -> None:
@@ -73,10 +88,38 @@ def load_profile(raw: str) -> dict[str, object]:
     for source_name in ("dblp", "arxiv", "ieee_xplore"):
         if source_name in sources and not isinstance(sources[source_name], dict):
             raise ValueError(f"profile.sources.{source_name} must be an object")
+        if source_name not in sources:
+            continue
+        source = sources[source_name]
+        schema = SOURCE_SCHEMAS[source_name]
+        unknown_source_keys = set(source) - schema["allowed"]
+        if unknown_source_keys:
+            raise ValueError(f"profile.sources.{source_name} contains unknown fields: " + ", ".join(sorted(unknown_source_keys)))
+        for boolean_key in ("enabled", "reject_withdrawn"):
+            if boolean_key in source and not isinstance(source[boolean_key], bool):
+                raise ValueError(f"profile.sources.{source_name}.{boolean_key} must be boolean")
+        if "categories" in source and (not isinstance(source["categories"], list) or any(not isinstance(value, str) or not value.strip() for value in source["categories"])):
+            raise ValueError(f"profile.sources.{source_name}.categories must be a list of non-empty strings")
+        if "failure_policy" in source and source["failure_policy"] not in {"strict", "continue"}:
+            raise ValueError(f"profile.sources.{source_name}.failure_policy must be strict or continue")
+        for key, bounds in schema["integers"].items():
+            if key in source and (not isinstance(source[key], int) or isinstance(source[key], bool) or not bounds[0] <= source[key] <= bounds[1]):
+                raise ValueError(f"profile.sources.{source_name}.{key} must be an integer in {bounds[0]}..{bounds[1]}")
+        if "request_delay_seconds" in source and (not isinstance(source["request_delay_seconds"], (int, float)) or isinstance(source["request_delay_seconds"], bool) or not 3 <= source["request_delay_seconds"] <= 60):
+            raise ValueError("profile.sources.arxiv.request_delay_seconds must be numeric in 3..60")
     if "quotas" in digest:
         quotas = digest["quotas"]
         if not isinstance(quotas, dict) or any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in quotas.values()):
             raise ValueError("profile.digest.quotas must be an object of non-negative integers")
+        unknown_channels = set(quotas) - KNOWN_CHANNELS
+        if unknown_channels:
+            raise ValueError("profile.digest.quotas contains unknown channels: " + ", ".join(sorted(unknown_channels)))
+    if "eligibility" in profile:
+        unknown_eligibility = set(profile["eligibility"]) - {"control_policy"}
+        if unknown_eligibility:
+            raise ValueError("profile.eligibility contains unknown fields: " + ", ".join(sorted(unknown_eligibility)))
+        if "control_policy" in profile["eligibility"] and not isinstance(profile["eligibility"]["control_policy"], bool):
+            raise ValueError("profile.eligibility.control_policy must be boolean")
     numeric_source_keys = {"recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit"}
     for section, keys, label in ((sources, numeric_source_keys, "sources"), (digest, DIGEST_KEYS - {"quotas"}, "digest")):
         for key in keys & set(section):
