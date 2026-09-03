@@ -48,6 +48,7 @@ jobs:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
         run: ccf-paper-scout doctor --config config.action.json
       - name: Check unresolved delivery transaction
         run: |

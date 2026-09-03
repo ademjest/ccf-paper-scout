@@ -379,8 +379,13 @@ def fetch_dblp_page(
 
 
 def resolve_dblp_config(config: dict[str, Any]) -> dict[str, int]:
-    if "dblp" in config:
-        return dict(config.get("dblp") or {})
+    resolved = dict(config.get("dblp") or {})
+    sources = config.get("sources")
+    nested = sources.get("dblp") if isinstance(sources, dict) else None
+    if isinstance(nested, dict):
+        resolved.update({key: value for key, value in nested.items() if key != "enabled"})
+    if resolved:
+        return resolved
     legacy = max(1, int(config.get("per_venue", 30)))
     return {
         "page_size": legacy,
