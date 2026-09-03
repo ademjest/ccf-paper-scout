@@ -632,7 +632,18 @@ def select_digest(ranked: list[dict[str, Any]], config: dict[str, Any], topic_pr
     selected_ids: set[str] = set()
     for channel, quota_value in quotas.items():
         quota = max(0, int(quota_value))
-        channel_papers = [paper for paper in ranked if paper.get("channel", "formal") == channel]
+        if channel == "exploration":
+            channel_papers = [paper for paper in ranked if paper.get("topic_class") == "exploration"]
+        elif channel == "formal":
+            control_policy = bool(config.get("eligibility", {}).get("control_policy", False))
+            channel_papers = [
+                paper for paper in ranked
+                if paper.get("channel", "formal") in {"formal", "formal_control"}
+                and paper.get("topic_class") != "exploration"
+                and not (control_policy and "ieee_xplore" in paper.get("sources", []) and paper.get("channel") != "formal_control")
+            ]
+        else:
+            channel_papers = [paper for paper in ranked if paper.get("channel", "formal") == channel and paper.get("topic_class") != "exploration"]
         balanced = select_topic_balanced(channel_papers, min(quota, limit - len(selected)), topic_priority)
         for paper in balanced:
             if paper["id"] not in selected_ids and len(selected) < limit:
