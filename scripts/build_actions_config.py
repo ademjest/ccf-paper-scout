@@ -7,6 +7,81 @@ import json
 import os
 from pathlib import Path
 
+PROFILE_KEYS = {"version", "sources", "domains", "primary", "exploration", "digest"}
+SOURCE_KEYS = {"years", "venue_keys", "zotero_collection_keys", "recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit"}
+DIGEST_KEYS = {"min_score", "primary_topic_boost", "exploration_topic_boost", "max_exploration_results"}
+CREDENTIAL_KEY_PARTS = {"password", "passwd", "secret", "token", "credential", "authorization", "auth"}
+
+
+def _reject_credential_keys(value: object, path: str = "profile") -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if set(normalized.split("_")) & CREDENTIAL_KEY_PARTS or normalized in {"apikey", "api_key"}:
+                raise ValueError(f"profile contains credential-like key: {path}.{key}")
+            _reject_credential_keys(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_credential_keys(child, f"{path}[{index}]")
+
+
+def _string_list(profile: dict[str, object], name: str) -> list[str]:
+    value = profile[name]
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError(f"profile.{name} must be a list of non-empty strings")
+    return list(value)
+
+
+def load_profile(raw: str) -> dict[str, object]:
+    try:
+        profile = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"PAPER_SCOUT_PROFILE_JSON must be valid JSON: {exc.msg}") from None
+    if not isinstance(profile, dict):
+        raise ValueError("PAPER_SCOUT_PROFILE_JSON must be a JSON object")
+    _reject_credential_keys(profile)
+    unknown, missing = set(profile) - PROFILE_KEYS, PROFILE_KEYS - set(profile)
+    if unknown:
+        raise ValueError("profile contains unknown fields: " + ", ".join(sorted(unknown)))
+    if missing:
+        raise ValueError("profile is missing fields: " + ", ".join(sorted(missing)))
+    if profile["version"] != 1:
+        raise ValueError("profile.version must be 1")
+    for name in ("sources", "digest"):
+        if not isinstance(profile[name], dict):
+            raise ValueError(f"profile.{name} must be an object")
+    sources, digest = profile["sources"], profile["digest"]
+    if set(sources) - SOURCE_KEYS:
+        raise ValueError("profile.sources contains unknown fields: " + ", ".join(sorted(set(sources) - SOURCE_KEYS)))
+    if set(digest) - DIGEST_KEYS:
+        raise ValueError("profile.digest contains unknown fields: " + ", ".join(sorted(set(digest) - DIGEST_KEYS)))
+    for name in ("domains", "primary", "exploration"):
+        _string_list(profile, name)
+    for name in ("venue_keys", "zotero_collection_keys"):
+        if name in sources and (not isinstance(sources[name], list) or any(not isinstance(x, str) or not x for x in sources[name])):
+            raise ValueError(f"profile.sources.{name} must be a list of non-empty strings")
+    if "years" in sources and (not isinstance(sources["years"], list) or not sources["years"] or any(not isinstance(x, int) or isinstance(x, bool) for x in sources["years"])):
+        raise ValueError("profile.sources.years must be a non-empty list of integers")
+    for section, keys, label in ((sources, SOURCE_KEYS - {"years", "venue_keys", "zotero_collection_keys"}, "sources"), (digest, DIGEST_KEYS, "digest")):
+        for key in keys & set(section):
+            if not isinstance(section[key], (int, float)) or isinstance(section[key], bool):
+                raise ValueError(f"profile.{label}.{key} must be numeric")
+    return profile
+
+
+def merge_profile(payload: dict[str, object], profile: dict[str, object]) -> None:
+    payload.update(profile["sources"])
+    payload["explicit_interests"] = list(profile["domains"])
+    priority = payload.setdefault("topic_priority", {})
+    priority["primary_topics"] = list(profile["primary"])
+    priority["exploration_topics"] = list(profile["exploration"])
+    digest = profile["digest"]
+    if "min_score" in digest:
+        payload["min_score"] = digest["min_score"]
+    for name in DIGEST_KEYS - {"min_score"}:
+        if name in digest:
+            priority[name] = digest[name]
+
 
 def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enabled: bool = True) -> None:
     if not 1 <= max_results <= 20:
@@ -16,6 +91,10 @@ def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enab
     if missing:
         raise RuntimeError("missing Actions configuration: " + ", ".join(missing))
     payload = json.loads(base.read_text(encoding="utf-8"))
+    profile_raw = os.environ.get("PAPER_SCOUT_PROFILE_JSON")
+    if not profile_raw:
+        raise RuntimeError("missing Actions configuration: PAPER_SCOUT_PROFILE_JSON")
+    merge_profile(payload, load_profile(profile_raw))
     payload["max_results"] = max_results
     payload["seen_db"] = str(state_dir / "seen.json")
     payload["state_db"] = str(state_dir / "paper_scout.sqlite3")

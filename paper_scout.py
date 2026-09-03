@@ -670,7 +670,7 @@ def translate_papers(
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
                     atomic_write_text(cache_path, json.dumps(cache, ensure_ascii=False, indent=2) + "\n")
         except (RuntimeError, urllib.error.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            print(f"warning: LLM translation failed for {paper.get('id', paper.get('title'))}: {exc}", file=sys.stderr)
+            print(f"warning: LLM translation failed for one selected paper: {exc}", file=sys.stderr)
             paper.setdefault("title_zh", "")
             paper.setdefault("abstract_zh", "")
     return translated_count, cache_hits
@@ -930,6 +930,15 @@ def render_report(
     return "\n".join(lines)
 
 
+def log_selected_papers(papers: list[dict[str, Any]], debug_config: dict[str, Any]) -> None:
+    """Keep public runner logs count-only unless local title logging is explicitly enabled."""
+    if not debug_config.get("log_paper_titles", False):
+        print(f"      Selected paper details hidden ({len(papers)} papers)")
+        return
+    for index, paper in enumerate(papers, 1):
+        print(f"      {index:02d}. [{paper['venue']} {paper['year']}] score={paper['score']:.4f} {paper['title']}")
+
+
 def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     user_agent = config.get("user_agent", "ccf-paper-scout/0.1")
     print(f"[1/7] Loading interest corpus from {'local JSON' if args.interests else 'Zotero Web API'}...")
@@ -941,10 +950,8 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
         zotero_identity_papers = fetch_zotero(
             config, user_agent, cap_override=dedup_cap, use_collection_filter=False
         )
-    print(
-        f"      Loaded {len(interests)} interest papers and {len(zotero_identity_papers)} Zotero items for dedup; "
-        f"explicit directions: {', '.join(config.get('explicit_interests', [])) or '(none)'}"
-    )
+    print(f"      Loaded {len(interests)} interest papers and {len(zotero_identity_papers)} Zotero items for dedup; "
+          f"explicit direction count: {len(config.get('explicit_interests', []))}")
     debug_config = config.get("debug", {})
     if debug_config.get("list_zotero_items", False):
         debug_path = Path(debug_config.get("zotero_output", "zotero_library_debug.md"))
@@ -1017,8 +1024,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     ranked = [paper for paper in ranked if paper["score"] >= min_score]
     selected = select_topic_balanced(ranked, int(config.get("max_results", 20)), topic_priority)
     print(f"[6/7] Selected {len(selected)} papers from {len(ranked)} above min_score={min_score}")
-    for index, paper in enumerate(selected, 1):
-        print(f"      {index:02d}. [{paper['venue']} {paper['year']}] score={paper['score']:.4f} {paper['title']}")
+    log_selected_papers(selected, dict(config.get("debug", {})))
     translation_config = dict(config.get("llm_translation", {}))
     translation_config.setdefault("user_interests", config.get("explicit_interests", []))
     print(f"[7/7] {llm_status(translation_config)}")

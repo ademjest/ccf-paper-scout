@@ -38,6 +38,7 @@ jobs:
           SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          PAPER_SCOUT_PROFILE_JSON: ${{ secrets.PAPER_SCOUT_PROFILE_JSON }}
         run: python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results 10
       - name: Verify generated runtime config
         run: |
