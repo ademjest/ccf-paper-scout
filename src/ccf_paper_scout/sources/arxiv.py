@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import re
 import xml.etree.ElementTree as ET
 import urllib.parse
@@ -92,5 +93,17 @@ class ArxivSource:
         root = ET.fromstring(text)
         raw_count = len(root.findall("a:entry", NS))
         records = parse_arxiv_atom(text, reject_withdrawn=bool(request.get("reject_withdrawn", True)))
+        max_age_days = int(request.get("max_age_days", 0))
+        if max_age_days > 0:
+            cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=max_age_days)
+            filtered: list[Paper] = []
+            for paper in records:
+                try:
+                    updated = dt.datetime.fromisoformat(paper.updated_at.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if updated >= cutoff:
+                    filtered.append(paper)
+            records = filtered
         next_cursor = str(start + raw_count) if raw_count == page_size else None
         return SourceBatch(records=records, next_cursor=next_cursor, raw_count=raw_count, exhausted=next_cursor is None)

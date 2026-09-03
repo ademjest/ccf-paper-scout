@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-PROFILE_KEYS = {"version", "sources", "domains", "primary", "exploration", "digest"}
+PROFILE_KEYS = {"version", "sources", "domains", "primary", "exploration", "digest", "eligibility"}
 SOURCE_KEYS = {"years", "venue_keys", "zotero_collection_keys", "recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit", "dblp", "arxiv", "ieee_xplore"}
 DIGEST_KEYS = {"min_score", "primary_topic_boost", "exploration_topic_boost", "max_exploration_results", "quotas"}
 CREDENTIAL_KEY_PARTS = {"password", "passwd", "secret", "token", "credential", "authorization", "auth"}
@@ -44,7 +44,9 @@ def load_profile(raw: str) -> dict[str, object]:
     if not isinstance(profile, dict):
         raise ValueError("PAPER_SCOUT_PROFILE_JSON must be a JSON object")
     _reject_credential_keys(profile)
-    unknown, missing = set(profile) - PROFILE_KEYS, PROFILE_KEYS - set(profile)
+    unknown = set(profile) - PROFILE_KEYS
+    required_keys = PROFILE_KEYS - {"eligibility"}
+    missing = required_keys - set(profile)
     if unknown:
         raise ValueError("profile contains unknown fields: " + ", ".join(sorted(unknown)))
     if missing:
@@ -54,6 +56,8 @@ def load_profile(raw: str) -> dict[str, object]:
     for name in ("sources", "digest"):
         if not isinstance(profile[name], dict):
             raise ValueError(f"profile.{name} must be an object")
+    if "eligibility" in profile and not isinstance(profile["eligibility"], dict):
+        raise ValueError("profile.eligibility must be an object")
     sources, digest = profile["sources"], profile["digest"]
     if set(sources) - SOURCE_KEYS:
         raise ValueError("profile.sources contains unknown fields: " + ", ".join(sorted(set(sources) - SOURCE_KEYS)))
@@ -87,6 +91,12 @@ def merge_profile(payload: dict[str, object], profile: dict[str, object]) -> Non
     payload.update(profile_sources)
     if adapter_sources:
         payload["sources"] = adapter_sources
+    if "eligibility" in profile:
+        allowed_eligibility = {"control_policy"}
+        unknown = set(profile["eligibility"]) - allowed_eligibility
+        if unknown:
+            raise ValueError("profile.eligibility contains unknown fields: " + ", ".join(sorted(unknown)))
+        payload["eligibility"] = dict(profile["eligibility"])
     payload["explicit_interests"] = list(profile["domains"])
     priority = payload.setdefault("topic_priority", {})
     priority["primary_topics"] = list(profile["primary"])
@@ -119,6 +129,11 @@ def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enab
         raise RuntimeError("missing Actions configuration: PAPER_SCOUT_PROFILE_JSON")
     merge_profile(payload, load_profile(profile_raw))
     payload["max_results"] = max_results
+    if isinstance(payload.get("digest"), dict):
+        payload["digest"]["max_results"] = max_results
+        quotas = payload["digest"].get("quotas", {})
+        if sum(int(value) for value in quotas.values()) > max_results:
+            raise ValueError("profile.digest.quotas exceed runtime max_results")
     payload["seen_db"] = str(state_dir / "seen.json")
     payload["state_db"] = str(state_dir / "paper_scout.sqlite3")
     payload["run_lock"] = str(state_dir / "paper_scout.lock")

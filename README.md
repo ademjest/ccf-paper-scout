@@ -1,12 +1,8 @@
 # CCF Paper Scout
 
-CCF Paper Scout 是一个面向个人研究者的自动论文推荐程序。它从 Zotero 构建兴趣画像，从 DBLP 获取指定 CCF-A venue 的正式论文记录，使用本地算法完成过滤、去重和排序，可选调用 OpenAI-compatible API 生成中文论文卡片，并通过 GitHub Actions 和 SMTP 每日发送邮件。
+CCF Paper Scout 是一个面向个人研究者的自动论文推荐程序。它从 Zotero 构建兴趣画像，可按私人 Profile 自主选择 DBLP、arXiv 和 IEEE Xplore 数据源，使用本地算法完成出版状态区分、跨源去重和排序，可选调用 OpenAI-compatible API 生成中文论文卡片，并通过 GitHub Actions 和 SMTP 每日发送邮件。
 
-当前默认偏好：
-
-- 主要方向：强化学习（RL）、多智能体强化学习（MARL）、LLM-assisted RL；
-- 拓展方向：LLM Agent；
-- 每次最多推荐 10 篇，其中纯 LLM Agent 拓展论文最多 1 篇。
+公开配置不包含个人研究方向。GitHub Actions 从加密 Secret `PAPER_SCOUT_PROFILE_JSON` 注入私人画像；本地运行可在未提交的 `config.json` 中配置。
 
 ## 工作流程
 
@@ -14,18 +10,18 @@ CCF Paper Scout 是一个面向个人研究者的自动论文推荐程序。它�
 GitHub Actions
   → 恢复私有状态
   → 读取 Zotero 兴趣文献
-  → 分页检索 DBLP
-  → CCF-A 白名单与 DBLP record-key 校验
+  → 按私人 Profile 检索 DBLP / arXiv / IEEE Xplore
+  → CCF-A、预印本与控制工程资格策略
   → 排除已推送论文和 Zotero 已收藏论文
   → 本地相关性排序与主题优先级
-  → OpenAlex 补充英文摘要
+  → DOI 跨源合并，OpenAlex 补充英文摘要
   → 选择最多 10 篇论文
   → LLM 生成中文论文卡片（可选）
   → SMTP 投递
   → 持久化 SQLite 和去重状态
 ```
 
-LLM 不参与 CCF-A 资格判断、去重、核心排序和最终选文。它只处理最终入选论文的标题和摘要，用于生成中文标题、中文摘要、问题、方法、创新、证据、局限、推荐理由和主题标签。
+LLM 不参与来源选择、出版状态、CCF-A/控制工程资格判断、跨源去重、核心排序和最终选文。它只处理最终入选论文的标题和摘要，用于生成中文标题、中文摘要、问题、方法、创新、证据、局限、推荐理由和主题标签。
 
 ## 环境要求
 
@@ -79,7 +75,7 @@ ccf-paper-scout run \
 - `dblp`：分页、重试和部分数据源失败策略；
 - `max_results`：每次最多推荐数量，当前默认 10；
 - `min_score`：最低相关性分数；
-- `explicit_interests`：显式主要研究方向；
+- `explicit_interests`：显式研究方向（公开示例保持为空）；
 - `topic_priority.primary_topics`：主要方向；
 - `topic_priority.exploration_topics`：拓展方向；
 - `topic_priority.max_exploration_results`：拓展方向最大篇数；
@@ -107,6 +103,22 @@ ccf-paper-scout run --config config.json --output recommendations.md
 - `Paper Scout Daily`：每日自动推荐。
 
 另有 `Keep Scheduled Workflows Active`，用于降低公开仓库长时间无提交后 schedule 被暂停的概率。
+
+### GitHub Actions 怎样读取配置
+
+GitHub Actions 无法读取用户电脑上的 `config.json`。云端流程为：
+
+```text
+公开的 config.example.json（中性默认值）
++ 加密 Secret PAPER_SCOUT_PROFILE_JSON（私人来源和研究方向）
++ 其他服务 Secrets（凭据）
+→ scripts/build_actions_config.py 严格校验和合并
+→ runner 临时文件 config.action.json（权限 0600）
+→ 推荐程序读取
+→ workflow 结束后 runner 被销毁
+```
+
+`config.action.json` 不会提交到代码仓库、状态仓库或 Artifact。生产日志默认不输出完整配置、具体兴趣词、论文标题或报告正文。注意：能修改默认分支 workflow 的维护者理论上可以让 workflow 读取 Secrets，因此公开 Fork 的使用者应保护仓库写权限、审核 workflow 改动，并且不要让不受信任的 pull request 在可访问生产 Secrets 的事件中运行。
 
 ### 1. 创建私有状态仓库
 
@@ -145,6 +157,8 @@ SMTP_PASSWORD
 LLM_API_KEY
 LLM_BASE_URL
 LLM_MODEL
+IEEE_XPLORE_API_KEY
+PAPER_SCOUT_PROFILE_JSON
 STATE_REPO_TOKEN
 ```
 
@@ -154,6 +168,123 @@ STATE_REPO_TOKEN
 - QQ 邮箱默认使用 `smtp.qq.com:465` 和 SSL；
 - `STATE_REPO_TOKEN` 建议使用只授权私有状态仓库、Contents read/write 的 fine-grained token；
 - 所有 Secret 都不得出现在 Issue、PR、日志或配置文件中。
+
+`PAPER_SCOUT_PROFILE_JSON` 必须是单个 JSON 对象，当前 schema version 为 `1`。顶层字段固定为
+`version`、`sources`、`domains`、`primary`、`exploration`、`digest`，以及可选的 `eligibility`；未知字段和任何类似凭据的 key
+（例如 `password`、`token`、`secret`、`api_key`）都会导致配置构建失败。例如：
+
+```json
+{
+  "version": 1,
+  "sources": {
+    "years": [2026, 2025],
+    "venue_keys": ["nips", "icml"],
+    "zotero_collection_keys": []
+  },
+  "domains": ["your broad research domain"],
+  "primary": ["your primary topic"],
+  "exploration": ["an adjacent topic"],
+  "digest": {
+    "min_score": 0.01,
+    "primary_topic_boost": 2.0,
+    "exploration_topic_boost": 0.2,
+    "max_exploration_results": 1
+  }
+}
+```
+
+上面是 DBLP-only 的最小示例。用户应只启用自己需要的数据源和方向，不要同时开启所有领域。常用组合如下。
+
+RL / MARL / LLM-assisted RL：
+
+```json
+{
+  "version": 1,
+  "sources": {
+    "years": [2026, 2025],
+    "venue_keys": ["nips", "icml", "aaai"],
+    "dblp": {"enabled": true},
+    "arxiv": {
+      "enabled": true,
+      "categories": ["cs.LG", "stat.ML"],
+      "max_age_days": 14,
+      "max_pages": 2,
+      "failure_policy": "continue"
+    },
+    "ieee_xplore": {"enabled": false}
+  },
+  "domains": ["reinforcement learning"],
+  "primary": [
+    "reinforcement learning",
+    "multi-agent reinforcement learning",
+    "LLM-assisted reinforcement learning"
+  ],
+  "exploration": ["LLM agents"],
+  "digest": {
+    "primary_topic_boost": 2.0,
+    "exploration_topic_boost": 0.2,
+    "max_exploration_results": 1,
+    "quotas": {"formal": 7, "preprint": 2, "exploration": 1}
+  }
+}
+```
+
+控制工程（arXiv + IEEE Xplore）：
+
+```json
+{
+  "version": 1,
+  "sources": {
+    "years": [2026, 2025],
+    "venue_keys": [],
+    "dblp": {"enabled": false},
+    "arxiv": {
+      "enabled": true,
+      "categories": ["eess.SY", "math.OC", "cs.RO"],
+      "max_age_days": 14,
+      "max_pages": 2,
+      "failure_policy": "continue"
+    },
+    "ieee_xplore": {
+      "enabled": true,
+      "page_size": 50,
+      "max_pages": 2,
+      "failure_policy": "continue"
+    }
+  },
+  "domains": ["control systems"],
+  "primary": [
+    "model predictive control",
+    "optimal control",
+    "robust control",
+    "adaptive control",
+    "system identification"
+  ],
+  "exploration": ["reinforcement learning for control"],
+  "eligibility": {"control_policy": true},
+  "digest": {
+    "primary_topic_boost": 2.0,
+    "exploration_topic_boost": 0.2,
+    "max_exploration_results": 1,
+    "quotas": {"formal_control": 7, "preprint": 2, "exploration": 1}
+  }
+}
+```
+
+说明：
+
+- `dblp` 适合 CCF-A 正式计算机论文；`arxiv` 是预印本来源；`ieee_xplore` 是 IEEE 出版商记录来源；
+- arXiv 论文会明确标记为“预印本（未经同行评审）”，不会被描述为 CCF-A 正式论文；
+- IEEE 出版商记录本身不会自动获得控制核心资格，只有本地审核列表中的 Venue 才进入 `formal_control`；
+- 启用 IEEE 时还需单独创建 `IEEE_XPLORE_API_KEY` Secret；API Key 不得写入 Profile JSON；
+- `quotas` 总和不能超过工作流的 `max_results`。Daily 固定为 10，Manual 可在 1–20 范围内选择，但不得低于 Profile 配额总和；
+- arXiv API 无需 Key；默认建议约每 3 秒最多请求一次，并限制类别、主题、时间窗口与页数。
+
+`sources` 可包含通用参数 `years`、`venue_keys`、`zotero_collection_keys`、`recent_interest_items`、
+`zotero_dedup_items`、`openalex_enrich_limit`，以及来源对象 `dblp`、`arxiv`、`ieee_xplore`；
+`digest` 可包含主题权重和 `quotas`。Actions 日志默认只显示
+兴趣和入选论文计数，不显示具体方向或标题。仅本地调试时可在未提交的配置中显式设置
+`debug.log_paper_titles: true`。Manual preview 报告只留在临时 runner，不上传 Actions artifact。
 
 ### 4. 按顺序验收
 

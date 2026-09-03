@@ -17,7 +17,6 @@ ccf-paper-scout = "ccf_paper_scout.cli:main"
 
 [tool.setuptools]
 py-modules = ["paper_scout", "state_store"]
-package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

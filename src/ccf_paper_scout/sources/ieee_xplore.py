@@ -55,8 +55,12 @@ class IeeeXploreSource:
             "querytext": query,
         })
         req = urllib.request.Request("https://ieeexploreapi.ieee.org/api/v1/search/articles?" + params)
-        with urllib.request.urlopen(req, timeout=int(request.get("timeout_seconds", 60))) as response:
-            payload = json.load(response)
+        try:
+            with urllib.request.urlopen(req, timeout=int(request.get("timeout_seconds", 60))) as response:
+                payload = json.load(response)
+        except Exception as exc:
+            safe_message = str(exc).replace(key, "[REDACTED]")
+            raise RuntimeError(f"IEEE Xplore request failed: {safe_message}") from None
         records = parse_ieee_payload(payload)
         raw_count = len(payload.get("articles", []) or [])
         total = int(payload.get("total_records", raw_count) or raw_count)

@@ -32,6 +32,7 @@ from ccf_paper_scout.identity import merge_papers
 from ccf_paper_scout.models import Paper, SourceEvidence
 from ccf_paper_scout.sources.arxiv import ArxivSource
 from ccf_paper_scout.sources.ieee_xplore import IeeeXploreSource
+from ccf_paper_scout.eligibility.control import apply_control_policy
 
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#-]{1,}|[\u4e00-\u9fff]{2,}")
 ANALYSIS_SCHEMA_VERSION = 1
@@ -534,7 +535,7 @@ def paper_to_candidate(paper: Paper, dblp_records: dict[str, dict[str, Any]]) ->
         "arxiv_id": paper.identifiers.get("arxiv", ""),
         "identifiers": dict(paper.identifiers),
         "publication_status": paper.publication_status,
-        "channel": "formal" if paper.publication_status in ("accepted", "online_first", "published") else paper.channel,
+        "channel": paper.channel if paper.channel else ("formal" if paper.publication_status in ("accepted", "online_first", "published") else "other"),
         "sources": [source.source for source in paper.sources],
         "identity_aliases": sorted(paper_identity_aliases(paper)),
     })
@@ -591,15 +592,18 @@ def collect_enabled_sources(
                 if cursor is None:
                     break
         except Exception as exc:
-            print(f"source={source_name} status=failed error={exc}", file=sys.stderr)
-            failures.append({"source": source_name, "error": str(exc)})
+            print(f"source={source_name} status=failed error_type={type(exc).__name__}", file=sys.stderr)
+            failures.append({"source": source_name, "error": type(exc).__name__})
             if policy == "strict":
-                raise
+                raise RuntimeError(f"{source_name} source failed ({type(exc).__name__})") from None
 
     dblp_by_id = {str(record.get("id", "")): record for record in dblp_records}
     result: list[dict[str, Any]] = []
     seen_lower = {str(value).lower() for value in seen}
-    for paper in merge_papers(papers):
+    merged_papers = merge_papers(papers)
+    if bool(config.get("eligibility", {}).get("control_policy", False)):
+        apply_control_policy(merged_papers)
+    for paper in merged_papers:
         candidate = paper_to_candidate(paper, dblp_by_id)
         aliases = paper_identity_aliases(paper)
         if aliases & seen_lower:
@@ -1072,11 +1076,14 @@ def render_report(
             lines.append(f"- 主题标签：{'、'.join(p['tags'])}")
         lines += [
             f"- 相关度：{p['score']:.4f}",
-            f"- Venue：{p['venue']}（CCF-{p['rank']}，{p['year']}，{p['type']}）",
+            f"- Venue：{p['venue']}（{'CCF-' + str(p['rank']) if p.get('rank') not in (None, '', 'N/A') else '未使用 CCF 等级'}，{p['year']}，{p['type']}）",
             f"- 作者：{authors}",
             f"- 匹配依据：{reasons}",
-            f"- DBLP：{p['url']}",
         ]
+        sources = p.get("sources", [])
+        source_label = " / ".join(str(source) for source in sources) if sources else ("arXiv" if p.get("channel") == "preprint" else "DBLP")
+        lines.append(f"- 来源：{source_label}")
+        lines.append(f"- 论文入口：{p['url']}")
         if p.get("ee"):
             lines.append(f"- 出版/全文入口：{p['ee']}")
         if p.get("abstract_zh"):
@@ -1084,7 +1091,7 @@ def render_report(
         if p.get("abstract"):
             lines.append(f"- 原文摘要：{p['abstract']}")
         lines.append("")
-    lines += ["---", "质量说明：所有结果均受本地 CCF-A venue 白名单约束，并通过 DBLP record-key 前缀复核以降低文本误命中；这不是官方认证或对单篇论文质量的结论，请以最新 CCF 官方目录和正式 proceedings 为准。", ""]
+    lines += ["---", "质量说明：DBLP 正式论文按本地 CCF-A 策略和 DBLP record-key 一致性过滤；arXiv 记录是未经同行评审的预印本；IEEE Xplore 记录仅证明出版社元数据存在，不自动代表控制领域核心论文。Venue 策略不是对单篇论文质量的官方认证。", ""]
     return "\n".join(lines)
 
 
@@ -1217,7 +1224,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     delivery_marker = marker_state_path.parent / ".delivery-pending"
     if delivery_enabled and selected:
         subject = delivery_config.get("subject", f"CCF Paper Scout Daily — {len(selected)} papers")
-        print(f"      Delivering digest by SMTP to {delivery_config.get('receiver', '(missing)')}...")
+        print("      Delivering digest by SMTP...")
         maybe_wait_for_delivery_schedule()
         write_delivery_marker(delivery_marker, run_id, "delivery_pending", selected, report)
         gate_env = os.environ.get("PAPER_SCOUT_DELIVERY_GATE", "")
