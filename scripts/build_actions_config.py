@@ -8,8 +8,8 @@ import os
 from pathlib import Path
 
 PROFILE_KEYS = {"version", "sources", "domains", "primary", "exploration", "digest"}
-SOURCE_KEYS = {"years", "venue_keys", "zotero_collection_keys", "recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit"}
-DIGEST_KEYS = {"min_score", "primary_topic_boost", "exploration_topic_boost", "max_exploration_results"}
+SOURCE_KEYS = {"years", "venue_keys", "zotero_collection_keys", "recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit", "dblp", "arxiv", "ieee_xplore"}
+DIGEST_KEYS = {"min_score", "primary_topic_boost", "exploration_topic_boost", "max_exploration_results", "quotas"}
 CREDENTIAL_KEY_PARTS = {"password", "passwd", "secret", "token", "credential", "authorization", "auth"}
 
 
@@ -17,7 +17,11 @@ def _reject_credential_keys(value: object, path: str = "profile") -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             normalized = str(key).lower().replace("-", "_")
-            if set(normalized.split("_")) & CREDENTIAL_KEY_PARTS or normalized in {"apikey", "api_key"}:
+            if (
+                set(normalized.split("_")) & CREDENTIAL_KEY_PARTS
+                or normalized in {"apikey", "api_key"}
+                or normalized.endswith("_key")
+            ):
                 raise ValueError(f"profile contains credential-like key: {path}.{key}")
             _reject_credential_keys(child, f"{path}.{key}")
     elif isinstance(value, list):
@@ -62,7 +66,15 @@ def load_profile(raw: str) -> dict[str, object]:
             raise ValueError(f"profile.sources.{name} must be a list of non-empty strings")
     if "years" in sources and (not isinstance(sources["years"], list) or not sources["years"] or any(not isinstance(x, int) or isinstance(x, bool) for x in sources["years"])):
         raise ValueError("profile.sources.years must be a non-empty list of integers")
-    for section, keys, label in ((sources, SOURCE_KEYS - {"years", "venue_keys", "zotero_collection_keys"}, "sources"), (digest, DIGEST_KEYS, "digest")):
+    for source_name in ("dblp", "arxiv", "ieee_xplore"):
+        if source_name in sources and not isinstance(sources[source_name], dict):
+            raise ValueError(f"profile.sources.{source_name} must be an object")
+    if "quotas" in digest:
+        quotas = digest["quotas"]
+        if not isinstance(quotas, dict) or any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in quotas.values()):
+            raise ValueError("profile.digest.quotas must be an object of non-negative integers")
+    numeric_source_keys = {"recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit"}
+    for section, keys, label in ((sources, numeric_source_keys, "sources"), (digest, DIGEST_KEYS - {"quotas"}, "digest")):
         for key in keys & set(section):
             if not isinstance(section[key], (int, float)) or isinstance(section[key], bool):
                 raise ValueError(f"profile.{label}.{key} must be numeric")
@@ -70,7 +82,11 @@ def load_profile(raw: str) -> dict[str, object]:
 
 
 def merge_profile(payload: dict[str, object], profile: dict[str, object]) -> None:
-    payload.update(profile["sources"])
+    profile_sources = dict(profile["sources"])
+    adapter_sources = {name: profile_sources.pop(name) for name in ("dblp", "arxiv", "ieee_xplore") if name in profile_sources}
+    payload.update(profile_sources)
+    if adapter_sources:
+        payload["sources"] = adapter_sources
     payload["explicit_interests"] = list(profile["domains"])
     priority = payload.setdefault("topic_priority", {})
     priority["primary_topics"] = list(profile["primary"])
@@ -78,9 +94,16 @@ def merge_profile(payload: dict[str, object], profile: dict[str, object]) -> Non
     digest = profile["digest"]
     if "min_score" in digest:
         payload["min_score"] = digest["min_score"]
-    for name in DIGEST_KEYS - {"min_score"}:
+    if "quotas" in digest:
+        payload["digest"] = {"max_results": payload.get("max_results", 10), "quotas": dict(digest["quotas"])}
+    for name in DIGEST_KEYS - {"min_score", "quotas"}:
         if name in digest:
             priority[name] = digest[name]
+    topics = list(profile["primary"]) + list(profile["exploration"])
+    for name in ("arxiv", "ieee_xplore"):
+        source = payload.get("sources", {}).get(name) if isinstance(payload.get("sources"), dict) else None
+        if isinstance(source, dict) and source.get("enabled"):
+            source["topics"] = topics
 
 
 def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enabled: bool = True) -> None:

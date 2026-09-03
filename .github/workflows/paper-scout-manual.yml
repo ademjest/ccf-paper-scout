@@ -78,6 +78,7 @@ jobs:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
         run: ccf-paper-scout run --config config.action.json --output recommendations.md --no-update-seen
       - name: Check unresolved delivery transaction
         if: inputs.mode == 'production'
@@ -93,6 +94,7 @@ jobs:
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
           PAPER_SCOUT_DELIVERY_GATE: .runtime-state/state/.delivery-approved
         run: |
@@ -124,4 +126,3 @@ jobs:
             basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
             git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
           fi
-

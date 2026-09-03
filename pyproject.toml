@@ -16,9 +16,12 @@ dependencies = []
 ccf-paper-scout = "ccf_paper_scout.cli:main"
 
 [tool.setuptools]
-packages = ["ccf_paper_scout"]
 py-modules = ["paper_scout", "state_store"]
-package-dir = {"ccf_paper_scout" = "src/ccf_paper_scout"}
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ccf_paper_scout*"]
 
 [tool.setuptools.package-data]
 ccf_paper_scout = ["data/*.json"]
