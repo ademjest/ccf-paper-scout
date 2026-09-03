@@ -53,6 +53,7 @@ jobs:
           SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          PAPER_SCOUT_PROFILE_JSON: ${{ secrets.PAPER_SCOUT_PROFILE_JSON }}
         run: |
           case "$REQUESTED_MAX_RESULTS" in (*[!0-9]*|'') echo "max_results must be an integer"; exit 2;; esac
           if [ "$REQUESTED_MAX_RESULTS" -lt 1 ] || [ "$REQUESTED_MAX_RESULTS" -gt 20 ]; then echo "max_results must be 1..20"; exit 2; fi
@@ -65,6 +66,7 @@ jobs:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
         run: ccf-paper-scout doctor --config config.action.json
       - name: SMTP test
         if: inputs.mode == 'smtp-test'
@@ -77,6 +79,7 @@ jobs:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
         run: ccf-paper-scout run --config config.action.json --output recommendations.md --no-update-seen
       - name: Check unresolved delivery transaction
         if: inputs.mode == 'production'
@@ -92,6 +95,7 @@ jobs:
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
           PAPER_SCOUT_DELIVERY_GATE: .runtime-state/state/.delivery-approved
         run: |
@@ -123,11 +127,3 @@ jobs:
             basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
             git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
           fi
-      - name: Upload preview report
-        if: inputs.mode == 'preview' && success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: paper-scout-${{ inputs.mode }}-${{ github.run_id }}
-          path: recommendations.md
-          if-no-files-found: ignore
-          retention-days: 7

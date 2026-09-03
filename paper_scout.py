@@ -28,6 +28,12 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ccf_paper_scout.identity import merge_papers
+from ccf_paper_scout.models import Paper, SourceEvidence
+from ccf_paper_scout.sources.arxiv import ArxivSource
+from ccf_paper_scout.sources.ieee_xplore import IeeeXploreSource
+from ccf_paper_scout.eligibility.control import apply_control_policy
+
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#-]{1,}|[\u4e00-\u9fff]{2,}")
 ANALYSIS_SCHEMA_VERSION = 1
 ANALYSIS_STRING_FIELDS = (
@@ -373,8 +379,13 @@ def fetch_dblp_page(
 
 
 def resolve_dblp_config(config: dict[str, Any]) -> dict[str, int]:
-    if "dblp" in config:
-        return dict(config.get("dblp") or {})
+    resolved = dict(config.get("dblp") or {})
+    sources = config.get("sources")
+    nested = sources.get("dblp") if isinstance(sources, dict) else None
+    if isinstance(nested, dict):
+        resolved.update({key: value for key, value in nested.items() if key != "enabled"})
+    if resolved:
+        return resolved
     legacy = max(1, int(config.get("per_venue", 30)))
     return {
         "page_size": legacy,
@@ -462,7 +473,8 @@ def collect_dblp_sources(
             try:
                 papers, fetched = fetch_dblp_incremental(venue, int(year), config, user_agent, seen, zotero_identities)
             except RuntimeError as exc:
-                print(f"source=DBLP venue={venue.get('abbr') or key} year={year} status=failed error={exc}", file=sys.stderr)
+                if config.get("debug_source_details", False):
+                    print(f"source=DBLP venue={venue.get('abbr') or key} year={year} status=failed error_type={type(exc).__name__}", file=sys.stderr)
                 failures.append({"venue": venue.get("abbr") or key, "year": int(year), "error": str(exc)})
                 if policy == "strict":
                     raise
@@ -472,11 +484,172 @@ def collect_dblp_sources(
                 stats[name] += fetched[name]
             for paper in papers:
                 candidates[paper["id"]] = paper
-            print(f"source=DBLP venue={venue.get('abbr') or key} year={year} status=success pages={fetched['pages']} unseen={len(papers)}")
+            if config.get("debug_source_details", False):
+                print(f"source=DBLP venue_slot status=success pages={fetched['pages']} unseen={len(papers)}")
     stats["success_ratio"] = successes / total if total else 1.0
     if stats["success_ratio"] < minimum:
         raise RuntimeError(f"DBLP success ratio {stats['success_ratio']:.3f} below minimum {minimum:.3f}")
     return candidates, stats, failures
+
+
+def paper_identity_aliases(paper: Paper) -> set[str]:
+    aliases = {paper.canonical_id.lower()} if paper.canonical_id else set()
+    for scheme in ("doi", "arxiv", "dblp", "ieee", "openalex"):
+        value = str(paper.identifiers.get(scheme, "")).strip().lower()
+        if value:
+            if scheme == "arxiv":
+                value = re.sub(r"v\d+$", "", value)
+            aliases.add(f"{scheme}:{value}")
+            if scheme == "dblp":
+                aliases.add(value)
+    return aliases
+
+
+def dblp_to_paper(record: dict[str, Any]) -> Paper:
+    doi = normalize_doi(record.get("doi", "") or record.get("ee", ""))
+    dblp_id = str(record.get("id", "")).strip()
+    identifiers = {"dblp": dblp_id}
+    if doi:
+        identifiers["doi"] = doi
+    canonical_id = f"doi:{doi}" if doi else f"dblp:{dblp_id.lower()}"
+    return Paper(
+        canonical_id=canonical_id, title=str(record.get("title", "")),
+        abstract=str(record.get("abstract", "")), authors=list(record.get("authors", [])),
+        publication_status="published", publication_year=int(record.get("year") or 0) or None,
+        venue_name=str(record.get("venue_name", "")), identifiers=identifiers,
+        sources=[SourceEvidence("dblp", dblp_id, "formal-index-record", str(record.get("url", "")))],
+        url=str(record.get("url", "")), channel="formal",
+    )
+
+
+def paper_to_candidate(paper: Paper, dblp_records: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    dblp_id = paper.identifiers.get("dblp", "")
+    base = dict(dblp_records.get(dblp_id, {}))
+    is_preprint = paper.publication_status == "preprint"
+    base.update({
+        "id": paper.canonical_id,
+        "title": paper.title,
+        "abstract": paper.abstract,
+        "authors": paper.authors or list(base.get("authors", [])),
+        "year": paper.publication_year or int(base.get("year") or dt.date.today().year),
+        "venue": base.get("venue") or paper.venue_name or ("arXiv" if is_preprint else paper.publisher or "Unknown"),
+        "venue_name": base.get("venue_name") or paper.venue_name,
+        "rank": base.get("rank") or "N/A",
+        "type": base.get("type") or ("preprint" if is_preprint else "journal"),
+        "url": base.get("url") or paper.url,
+        "ee": base.get("ee") or paper.pdf_url or paper.url,
+        "doi": paper.identifiers.get("doi", ""),
+        "arxiv_id": paper.identifiers.get("arxiv", ""),
+        "identifiers": dict(paper.identifiers),
+        "publication_status": paper.publication_status,
+        "channel": paper.channel if paper.channel else ("formal" if paper.publication_status in ("accepted", "online_first", "published") else "other"),
+        "sources": [source.source for source in paper.sources],
+        "identity_aliases": sorted(paper_identity_aliases(paper)),
+    })
+    if paper.venue_id:
+        base["venue_id"] = paper.venue_id
+    return base
+
+
+def dblp_enabled(config: dict[str, Any]) -> bool:
+    sources = config.get("sources")
+    if not isinstance(sources, dict) or "dblp" not in sources:
+        return True
+    dblp = sources["dblp"]
+    return bool(dblp.get("enabled", True)) if isinstance(dblp, dict) else bool(dblp)
+
+
+def resolve_source_configs(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw = config.get("sources")
+    if not isinstance(raw, dict):
+        return {}
+    aliases = {"ieee": "ieee_xplore"}
+    resolved: dict[str, dict[str, Any]] = {}
+    for name, value in raw.items():
+        normalized = aliases.get(str(name), str(name))
+        source_config = dict(value) if isinstance(value, dict) else {"enabled": bool(value)}
+        if source_config.get("enabled", False) and normalized in ("arxiv", "ieee_xplore"):
+            resolved[normalized] = source_config
+    return resolved
+
+
+def collect_enabled_sources(
+    dblp_records: list[dict[str, Any]], config: dict[str, Any], user_agent: str,
+    seen: set[str], zotero_identities: dict[str, set[str]], adapters: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
+    source_configs = resolve_source_configs(config)
+    adapters = adapters or {"arxiv": ArxivSource(), "ieee_xplore": IeeeXploreSource()}
+    papers = [dblp_to_paper(record) for record in dblp_records]
+    stats = {"raw_hits": 0, "delivered_skipped": 0, "zotero_skipped": 0}
+    failures: list[dict[str, Any]] = []
+    for source_name, source_config in source_configs.items():
+        policy = str(source_config.get("failure_policy", config.get("source_failure_policy", "strict")))
+        if policy not in ("strict", "continue"):
+            raise RuntimeError(f"sources.{source_name}.failure_policy must be strict or continue")
+        request = dict(source_config)
+        request["user_agent"] = user_agent
+        cursor: str | None = None
+        max_pages = max(1, int(request.get("max_pages", 1)))
+        try:
+            for _ in range(max_pages):
+                batch = adapters[source_name].discover(request, cursor)
+                papers.extend(batch.records)
+                stats["raw_hits"] += int(batch.raw_count)
+                cursor = batch.next_cursor
+                if cursor is None:
+                    break
+        except Exception as exc:
+            print(f"source={source_name} status=failed error_type={type(exc).__name__}", file=sys.stderr)
+            failures.append({"source": source_name, "error": type(exc).__name__})
+            if policy == "strict":
+                raise RuntimeError(f"{source_name} source failed ({type(exc).__name__})") from None
+
+    dblp_by_id = {str(record.get("id", "")): record for record in dblp_records}
+    result: list[dict[str, Any]] = []
+    seen_lower = {str(value).lower() for value in seen}
+    merged_papers = merge_papers(papers)
+    if bool(config.get("eligibility", {}).get("control_policy", False)):
+        apply_control_policy(merged_papers)
+    for paper in merged_papers:
+        candidate = paper_to_candidate(paper, dblp_by_id)
+        aliases = paper_identity_aliases(paper)
+        if aliases & seen_lower:
+            stats["delivered_skipped"] += 1
+            continue
+        if filter_one_zotero_existing(candidate, zotero_identities):
+            stats["zotero_skipped"] += 1
+            continue
+        result.append(candidate)
+    return result, stats, failures
+
+
+def select_digest(ranked: list[dict[str, Any]], config: dict[str, Any], topic_priority: dict[str, Any]) -> list[dict[str, Any]]:
+    limit = max(0, int(config.get("digest", {}).get("max_results", config.get("max_results", 20))))
+    quotas = dict(config.get("digest", {}).get("quotas", {}))
+    if not quotas:
+        return select_topic_balanced(ranked, limit, topic_priority)
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+    for channel, quota_value in quotas.items():
+        quota = max(0, int(quota_value))
+        if channel == "exploration":
+            channel_papers = [paper for paper in ranked if paper.get("topic_class") == "exploration"]
+        elif channel == "formal":
+            control_policy = bool(config.get("eligibility", {}).get("control_policy", False))
+            channel_papers = [
+                paper for paper in ranked
+                if paper.get("channel", "formal") in {"formal", "formal_control"}
+                and paper.get("topic_class") != "exploration"
+                and not (control_policy and "ieee_xplore" in paper.get("sources", []) and paper.get("channel") != "formal_control")
+            ]
+        else:
+            channel_papers = [paper for paper in ranked if paper.get("channel", "formal") == channel and paper.get("topic_class") != "exploration"]
+        balanced = select_topic_balanced(channel_papers, min(quota, limit - len(selected)), topic_priority)
+        for paper in balanced:
+            if paper["id"] not in selected_ids and len(selected) < limit:
+                selected.append(paper)
+                selected_ids.add(paper["id"])
+    return selected
 
 
 def openalex_abstract(inverted: Any) -> str:
@@ -670,7 +843,7 @@ def translate_papers(
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
                     atomic_write_text(cache_path, json.dumps(cache, ensure_ascii=False, indent=2) + "\n")
         except (RuntimeError, urllib.error.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            print(f"warning: LLM translation failed for {paper.get('id', paper.get('title'))}: {exc}", file=sys.stderr)
+            print(f"warning: LLM translation failed for one selected paper: {exc}", file=sys.stderr)
             paper.setdefault("title_zh", "")
             paper.setdefault("abstract_zh", "")
     return translated_count, cache_hits
@@ -892,14 +1065,21 @@ def render_report(
     now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     lines = ["# CCF-A 兴趣论文推荐", "", f"生成时间：{now}", f"兴趣库：{interest_count} 篇；CCF-A 候选：{candidate_count} 篇；本次输出：{len(papers)} 篇。", ""]
     if failed_sources:
-        missing = "、".join(f"{source['venue']} {source['year']}" for source in failed_sources)
-        lines += [f"数据源提示：{missing} 本次抓取失败，推荐结果不包含这些来源。", ""]
+        labels = []
+        for source in failed_sources:
+            if "source" in source:
+                labels.append(str(source["source"]))
+            else:
+                labels.append(f"{source['venue']} {source['year']}")
+        lines += [f"数据源提示：{'、'.join(labels)} 本次抓取失败，推荐结果不包含这些来源。", ""]
     if not papers:
         lines += ["本次没有未推荐过且通过 CCF-A 硬过滤的候选论文。", ""]
     for i, p in enumerate(papers, 1):
         reasons = "、".join(p["reasons"]) if p["reasons"] else "弱匹配（可扩大兴趣集合或接入摘要补全）"
         authors = ", ".join(p["authors"][:8]) + (" et al." if len(p["authors"]) > 8 else "")
         lines += [f"## {i}. {p['title']}", ""]
+        if p.get("channel") == "preprint" or p.get("publication_status") == "preprint":
+            lines.append("- 状态：预印本（未经同行评审）")
         if p.get("title_zh"):
             lines.append(f"- 中文标题：{p['title_zh']}")
         focus_fields = (
@@ -914,11 +1094,14 @@ def render_report(
             lines.append(f"- 主题标签：{'、'.join(p['tags'])}")
         lines += [
             f"- 相关度：{p['score']:.4f}",
-            f"- Venue：{p['venue']}（CCF-{p['rank']}，{p['year']}，{p['type']}）",
+            f"- Venue：{p['venue']}（{'CCF-' + str(p['rank']) if p.get('rank') not in (None, '', 'N/A') else '未使用 CCF 等级'}，{p['year']}，{p['type']}）",
             f"- 作者：{authors}",
             f"- 匹配依据：{reasons}",
-            f"- DBLP：{p['url']}",
         ]
+        sources = p.get("sources", [])
+        source_label = " / ".join(str(source) for source in sources) if sources else ("arXiv" if p.get("channel") == "preprint" else "DBLP")
+        lines.append(f"- 来源：{source_label}")
+        lines.append(f"- 论文入口：{p['url']}")
         if p.get("ee"):
             lines.append(f"- 出版/全文入口：{p['ee']}")
         if p.get("abstract_zh"):
@@ -926,8 +1109,17 @@ def render_report(
         if p.get("abstract"):
             lines.append(f"- 原文摘要：{p['abstract']}")
         lines.append("")
-    lines += ["---", "质量说明：所有结果均受本地 CCF-A venue 白名单约束，并通过 DBLP record-key 前缀复核以降低文本误命中；这不是官方认证或对单篇论文质量的结论，请以最新 CCF 官方目录和正式 proceedings 为准。", ""]
+    lines += ["---", "质量说明：DBLP 正式论文按本地 CCF-A 策略和 DBLP record-key 一致性过滤；arXiv 记录是未经同行评审的预印本；IEEE Xplore 记录仅证明出版社元数据存在，不自动代表控制领域核心论文。Venue 策略不是对单篇论文质量的官方认证。", ""]
     return "\n".join(lines)
+
+
+def log_selected_papers(papers: list[dict[str, Any]], debug_config: dict[str, Any]) -> None:
+    """Keep public runner logs count-only unless local title logging is explicitly enabled."""
+    if not debug_config.get("log_paper_titles", False):
+        print(f"      Selected paper details hidden ({len(papers)} papers)")
+        return
+    for index, paper in enumerate(papers, 1):
+        print(f"      {index:02d}. [{paper['venue']} {paper['year']}] score={paper['score']:.4f} {paper['title']}")
 
 
 def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
@@ -941,10 +1133,8 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
         zotero_identity_papers = fetch_zotero(
             config, user_agent, cap_override=dedup_cap, use_collection_filter=False
         )
-    print(
-        f"      Loaded {len(interests)} interest papers and {len(zotero_identity_papers)} Zotero items for dedup; "
-        f"explicit directions: {', '.join(config.get('explicit_interests', [])) or '(none)'}"
-    )
+    print(f"      Loaded {len(interests)} interest papers and {len(zotero_identity_papers)} Zotero items for dedup; "
+          f"explicit direction count: {len(config.get('explicit_interests', []))}")
     debug_config = config.get("debug", {})
     if debug_config.get("list_zotero_items", False):
         debug_path = Path(debug_config.get("zotero_output", "zotero_library_debug.md"))
@@ -968,7 +1158,7 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
         state_path = args.config.resolve().parent / state_path
     store = state_store.StateStore(state_path)
     store.migrate_legacy(seen_path, args.config.resolve().parent / "state/translations.json")
-    seen.update(store.delivered_ids())
+    seen.update(store.delivered_identity_aliases())
     run_id = store.start_run(hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest())
     try:
         return run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested, venue_by_key)
@@ -982,21 +1172,33 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
 def run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested, venue_by_key):
     dblp_config = resolve_dblp_config(config)
     dblp_config.setdefault("request_delay_seconds", config.get("request_delay_seconds", 1.0))
-    print(f"[2/7] Fetching CCF-A candidates with pagination: {len(requested)} venues × {len(config.get('years', [dt.date.today().year]))} years...")
-    print(f"      Dedup history: {len(seen)} previously delivered paper IDs in {seen_path}")
+    print("[2/7] Fetching candidates from profile-enabled sources...")
+    print(f"      Dedup history contains {len(seen)} delivered identity aliases")
     zotero_identities = build_zotero_identity_index(zotero_identity_papers)
-    candidates, source_stats, failed_sources = collect_dblp_sources(
-        requested, [int(year) for year in config.get("years", [dt.date.today().year])], venue_by_key,
-        dblp_config, user_agent, seen, zotero_identities,
-    )
+    if dblp_enabled(config):
+        candidates, source_stats, failed_sources = collect_dblp_sources(
+            requested, [int(year) for year in config.get("years", [dt.date.today().year])], venue_by_key,
+            dblp_config, user_agent, seen, zotero_identities,
+        )
+    else:
+        candidates = {}
+        source_stats = {"raw_hits": 0, "delivered_skipped": 0, "zotero_skipped": 0, "pages": 0}
+        failed_sources = []
     total_raw = source_stats["raw_hits"]
     skipped_seen = source_stats["delivered_skipped"]
     zotero_skipped_count = source_stats["zotero_skipped"]
+    candidate_values, adapter_stats, adapter_failures = collect_enabled_sources(
+        list(candidates.values()), config, user_agent, seen, zotero_identities,
+    )
+    total_raw += adapter_stats["raw_hits"]
+    skipped_seen += adapter_stats["delivered_skipped"]
+    zotero_skipped_count += adapter_stats["zotero_skipped"]
+    failed_sources.extend(adapter_failures)
+    candidates = {paper["id"]: paper for paper in candidate_values}
     print(
         f"[3/7] Deduplicated candidates: {total_raw} raw source hits, {skipped_seen} delivered, "
         f"{zotero_skipped_count} already in Zotero, {len(candidates)} eligible"
     )
-    candidate_values = list(candidates.values())
     # A title-only first pass decides which candidates deserve metadata API calls.
     print("[4/7] Ranking by titles, Zotero corpus and explicit interests...")
     title_ranked = rank_candidates(interests, candidate_values, config.get("explicit_interests", []))
@@ -1015,10 +1217,9 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     ranked = apply_topic_priorities(ranked, topic_priority)
     min_score = float(config.get("min_score", 0.01))
     ranked = [paper for paper in ranked if paper["score"] >= min_score]
-    selected = select_topic_balanced(ranked, int(config.get("max_results", 20)), topic_priority)
+    selected = select_digest(ranked, config, topic_priority)
     print(f"[6/7] Selected {len(selected)} papers from {len(ranked)} above min_score={min_score}")
-    for index, paper in enumerate(selected, 1):
-        print(f"      {index:02d}. [{paper['venue']} {paper['year']}] score={paper['score']:.4f} {paper['title']}")
+    log_selected_papers(selected, dict(config.get("debug", {})))
     translation_config = dict(config.get("llm_translation", {}))
     translation_config.setdefault("user_interests", config.get("explicit_interests", []))
     print(f"[7/7] {llm_status(translation_config)}")
@@ -1041,7 +1242,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     delivery_marker = marker_state_path.parent / ".delivery-pending"
     if delivery_enabled and selected:
         subject = delivery_config.get("subject", f"CCF Paper Scout Daily — {len(selected)} papers")
-        print(f"      Delivering digest by SMTP to {delivery_config.get('receiver', '(missing)')}...")
+        print("      Delivering digest by SMTP...")
         maybe_wait_for_delivery_schedule()
         write_delivery_marker(delivery_marker, run_id, "delivery_pending", selected, report)
         gate_env = os.environ.get("PAPER_SCOUT_DELIVERY_GATE", "")
@@ -1065,7 +1266,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
         with store.connection:
             store.connection.execute("UPDATE recommendation_items SET state='delivered' WHERE run_id=?", (run_id,))
     if should_update_seen(selected, delivery_enabled, delivered, args.no_update_seen):
-        seen.update(p["id"] for p in selected)
+        seen.update(alias for p in selected for alias in p.get("identity_aliases", [p["id"]]))
         seen_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             atomic_write_text(seen_path, json.dumps({"ids": sorted(seen)}, ensure_ascii=False, indent=2) + "\n")

@@ -38,6 +38,7 @@ jobs:
           SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          PAPER_SCOUT_PROFILE_JSON: ${{ secrets.PAPER_SCOUT_PROFILE_JSON }}
         run: python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results 10
       - name: Verify generated runtime config
         run: |
@@ -47,6 +48,7 @@ jobs:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
         run: ccf-paper-scout doctor --config config.action.json
       - name: Check unresolved delivery transaction
         run: |
@@ -60,6 +62,7 @@ jobs:
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
           PAPER_SCOUT_DELIVERY_GATE: .runtime-state/state/.delivery-approved
           PAPER_SCOUT_SCHEDULED_RUN: ${{ github.event_name == 'schedule' && 'true' || 'false' }}

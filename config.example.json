@@ -11,18 +11,10 @@
   },
   "max_results": 10,
   "min_score": 0.01,
-  "explicit_interests": [
-    "reinforcement learning",
-    "multi-agent reinforcement learning",
-    "LLM-assisted reinforcement learning"
-  ],
+  "explicit_interests": [],
   "topic_priority": {
-    "primary_topics": [
-      "reinforcement learning",
-      "multi-agent reinforcement learning",
-      "LLM-assisted reinforcement learning"
-    ],
-    "exploration_topics": ["LLM agents"],
+    "primary_topics": [],
+    "exploration_topics": [],
     "primary_topic_boost": 2.0,
     "exploration_topic_boost": 0.2,
     "max_exploration_results": 1
@@ -33,6 +25,7 @@
   "zotero_collection_keys": [],
   "debug": {
     "list_zotero_items": false,
+    "log_paper_titles": false,
     "zotero_output": "zotero_library_debug.md"
   },
   "llm_translation": {

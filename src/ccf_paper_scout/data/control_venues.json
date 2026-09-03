@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "authority": "project-maintained, expert-review-required",
+  "venues": [
+    {
+      "venue_id": "journal:ieee-tac",
+      "canonical_name": "IEEE Transactions on Automatic Control",
+      "aliases": ["IEEE TAC", "TAC"],
+      "type": "journal",
+      "publisher": "IEEE",
+      "tier": "core"
+    },
+    {
+      "venue_id": "journal:automatica",
+      "canonical_name": "Automatica",
+      "aliases": [],
+      "type": "journal",
+      "publisher": "Elsevier",
+      "tier": "core"
+    },
+    {
+      "venue_id": "conference:cdc",
+      "canonical_name": "IEEE Conference on Decision and Control",
+      "aliases": ["CDC"],
+      "type": "conference",
+      "publisher": "IEEE",
+      "tier": "core"
+    },
+    {
+      "venue_id": "journal:ieee-lcss",
+      "canonical_name": "IEEE Control Systems Letters",
+      "aliases": ["L-CSS", "LCSS"],
+      "type": "journal",
+      "publisher": "IEEE",
+      "tier": "core"
+    }
+  ]
+}

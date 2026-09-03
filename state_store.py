@@ -69,14 +69,17 @@ class StateStore:
         with self.connection:
             for rank, paper in enumerate(papers, 1):
                 paper_id = str(paper["id"])
-                self.connection.execute(
-                    "INSERT OR IGNORE INTO papers(paper_id,title,doi,first_seen_at) VALUES (?,?,?,?)",
-                    (paper_id, str(paper.get("title", "")), str(paper.get("doi", "")), now()),
-                )
-                self.connection.execute(
-                    "INSERT INTO recommendation_items VALUES (?,?,?,?,?)",
-                    (run_id, paper_id, rank, float(paper.get("score", 0)), "selected"),
-                )
+                aliases = {paper_id}
+                aliases.update(str(alias) for alias in paper.get("identity_aliases", []) if alias)
+                for alias in aliases:
+                    self.connection.execute(
+                        "INSERT OR IGNORE INTO papers(paper_id,title,doi,first_seen_at) VALUES (?,?,?,?)",
+                        (alias, str(paper.get("title", "")), str(paper.get("doi", "")), now()),
+                    )
+                    self.connection.execute(
+                        "INSERT OR IGNORE INTO recommendation_items VALUES (?,?,?,?,?)",
+                        (run_id, alias, rank, float(paper.get("score", 0)), "selected"),
+                    )
 
     def finish_run(self, run_id: str, status: str) -> None:
         with self.connection:
@@ -120,6 +123,19 @@ class StateStore:
             "SELECT DISTINCT paper_id FROM recommendation_items WHERE state='delivered'"
         )
         return {row[0] for row in rows}
+
+    def delivered_identity_aliases(self) -> set[str]:
+        rows = self.connection.execute(
+            "SELECT p.paper_id, p.doi FROM papers p JOIN recommendation_items i ON i.paper_id=p.paper_id "
+            "WHERE i.state='delivered'"
+        )
+        aliases: set[str] = set()
+        for paper_id, doi in rows:
+            aliases.add(str(paper_id).lower())
+            if doi:
+                normalized = str(doi).strip().lower()
+                aliases.add(normalized if normalized.startswith("doi:") else "doi:" + normalized)
+        return aliases
 
     def save_translation(self, key: str, fingerprint: str, payload: dict[str, Any]) -> None:
         self.connection.execute(

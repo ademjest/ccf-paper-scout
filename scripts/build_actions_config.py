@@ -5,7 +5,163 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import math
 from pathlib import Path
+
+PROFILE_KEYS = {"version", "sources", "domains", "primary", "exploration", "digest", "eligibility"}
+SOURCE_KEYS = {"years", "venue_keys", "zotero_collection_keys", "recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit", "dblp", "arxiv", "ieee_xplore"}
+DIGEST_KEYS = {"min_score", "primary_topic_boost", "exploration_topic_boost", "max_exploration_results", "quotas"}
+CREDENTIAL_KEY_PARTS = {"password", "passwd", "secret", "token", "credential", "authorization", "auth"}
+SOURCE_SCHEMAS = {
+    "dblp": {
+        "allowed": {"enabled", "page_size", "max_pages_per_venue", "target_unseen_per_venue", "stop_after_seen_pages", "failure_policy", "minimum_success_ratio"},
+        "integers": {"page_size": (1, 1000), "max_pages_per_venue": (1, 20), "target_unseen_per_venue": (1, 1000), "stop_after_seen_pages": (1, 20)},
+    },
+    "arxiv": {
+        "allowed": {"enabled", "categories", "page_size", "max_pages", "max_age_days", "request_delay_seconds", "timeout_seconds", "max_attempts", "failure_policy", "reject_withdrawn"},
+        "integers": {"page_size": (1, 100), "max_pages": (1, 20), "max_age_days": (1, 3650), "timeout_seconds": (1, 300), "max_attempts": (1, 5)},
+    },
+    "ieee_xplore": {
+        "allowed": {"enabled", "page_size", "max_pages", "timeout_seconds", "failure_policy"},
+        "integers": {"page_size": (1, 200), "max_pages": (1, 20), "timeout_seconds": (1, 300)},
+    },
+}
+KNOWN_CHANNELS = {"formal", "formal_control", "preprint", "exploration"}
+
+
+def _reject_credential_keys(value: object, path: str = "profile") -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if (
+                set(normalized.split("_")) & CREDENTIAL_KEY_PARTS
+                or normalized in {"apikey", "api_key"}
+                or normalized.endswith("_key")
+            ):
+                raise ValueError(f"profile contains credential-like key: {path}.{key}")
+            _reject_credential_keys(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_credential_keys(child, f"{path}[{index}]")
+
+
+def _string_list(profile: dict[str, object], name: str) -> list[str]:
+    value = profile[name]
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError(f"profile.{name} must be a list of non-empty strings")
+    return list(value)
+
+
+def load_profile(raw: str) -> dict[str, object]:
+    try:
+        profile = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"PAPER_SCOUT_PROFILE_JSON must be valid JSON: {exc.msg}") from None
+    if not isinstance(profile, dict):
+        raise ValueError("PAPER_SCOUT_PROFILE_JSON must be a JSON object")
+    _reject_credential_keys(profile)
+    unknown = set(profile) - PROFILE_KEYS
+    required_keys = PROFILE_KEYS - {"eligibility"}
+    missing = required_keys - set(profile)
+    if unknown:
+        raise ValueError("profile contains unknown fields: " + ", ".join(sorted(unknown)))
+    if missing:
+        raise ValueError("profile is missing fields: " + ", ".join(sorted(missing)))
+    if profile["version"] != 1:
+        raise ValueError("profile.version must be 1")
+    for name in ("sources", "digest"):
+        if not isinstance(profile[name], dict):
+            raise ValueError(f"profile.{name} must be an object")
+    if "eligibility" in profile and not isinstance(profile["eligibility"], dict):
+        raise ValueError("profile.eligibility must be an object")
+    sources, digest = profile["sources"], profile["digest"]
+    if set(sources) - SOURCE_KEYS:
+        raise ValueError("profile.sources contains unknown fields: " + ", ".join(sorted(set(sources) - SOURCE_KEYS)))
+    if set(digest) - DIGEST_KEYS:
+        raise ValueError("profile.digest contains unknown fields: " + ", ".join(sorted(set(digest) - DIGEST_KEYS)))
+    for name in ("domains", "primary", "exploration"):
+        _string_list(profile, name)
+    for name in ("venue_keys", "zotero_collection_keys"):
+        if name in sources and (not isinstance(sources[name], list) or any(not isinstance(x, str) or not x for x in sources[name])):
+            raise ValueError(f"profile.sources.{name} must be a list of non-empty strings")
+    if "years" in sources and (not isinstance(sources["years"], list) or not sources["years"] or any(not isinstance(x, int) or isinstance(x, bool) for x in sources["years"])):
+        raise ValueError("profile.sources.years must be a non-empty list of integers")
+    for source_name in ("dblp", "arxiv", "ieee_xplore"):
+        if source_name in sources and not isinstance(sources[source_name], dict):
+            raise ValueError(f"profile.sources.{source_name} must be an object")
+        if source_name not in sources:
+            continue
+        source = sources[source_name]
+        schema = SOURCE_SCHEMAS[source_name]
+        unknown_source_keys = set(source) - schema["allowed"]
+        if unknown_source_keys:
+            raise ValueError(f"profile.sources.{source_name} contains unknown fields: " + ", ".join(sorted(unknown_source_keys)))
+        for boolean_key in ("enabled", "reject_withdrawn"):
+            if boolean_key in source and not isinstance(source[boolean_key], bool):
+                raise ValueError(f"profile.sources.{source_name}.{boolean_key} must be boolean")
+        if "categories" in source and (not isinstance(source["categories"], list) or any(not isinstance(value, str) or not value.strip() for value in source["categories"])):
+            raise ValueError(f"profile.sources.{source_name}.categories must be a list of non-empty strings")
+        if "failure_policy" in source and source["failure_policy"] not in {"strict", "continue"}:
+            raise ValueError(f"profile.sources.{source_name}.failure_policy must be strict or continue")
+        for key, bounds in schema["integers"].items():
+            if key in source and (not isinstance(source[key], int) or isinstance(source[key], bool) or not bounds[0] <= source[key] <= bounds[1]):
+                raise ValueError(f"profile.sources.{source_name}.{key} must be an integer in {bounds[0]}..{bounds[1]}")
+        if source_name == "dblp" and "minimum_success_ratio" in source:
+            ratio = source["minimum_success_ratio"]
+            if not isinstance(ratio, (int, float)) or isinstance(ratio, bool) or not math.isfinite(float(ratio)) or not 0 <= float(ratio) <= 1:
+                raise ValueError("profile.sources.dblp.minimum_success_ratio must be finite numeric in 0..1")
+        if "request_delay_seconds" in source and (not isinstance(source["request_delay_seconds"], (int, float)) or isinstance(source["request_delay_seconds"], bool) or not 3 <= source["request_delay_seconds"] <= 60):
+            raise ValueError("profile.sources.arxiv.request_delay_seconds must be numeric in 3..60")
+    if "quotas" in digest:
+        quotas = digest["quotas"]
+        if not isinstance(quotas, dict) or any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in quotas.values()):
+            raise ValueError("profile.digest.quotas must be an object of non-negative integers")
+        unknown_channels = set(quotas) - KNOWN_CHANNELS
+        if unknown_channels:
+            raise ValueError("profile.digest.quotas contains unknown channels: " + ", ".join(sorted(unknown_channels)))
+    if "eligibility" in profile:
+        unknown_eligibility = set(profile["eligibility"]) - {"control_policy"}
+        if unknown_eligibility:
+            raise ValueError("profile.eligibility contains unknown fields: " + ", ".join(sorted(unknown_eligibility)))
+        if "control_policy" in profile["eligibility"] and not isinstance(profile["eligibility"]["control_policy"], bool):
+            raise ValueError("profile.eligibility.control_policy must be boolean")
+    numeric_source_keys = {"recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit"}
+    for section, keys, label in ((sources, numeric_source_keys, "sources"), (digest, DIGEST_KEYS - {"quotas"}, "digest")):
+        for key in keys & set(section):
+            if not isinstance(section[key], (int, float)) or isinstance(section[key], bool):
+                raise ValueError(f"profile.{label}.{key} must be numeric")
+    return profile
+
+
+def merge_profile(payload: dict[str, object], profile: dict[str, object]) -> None:
+    profile_sources = dict(profile["sources"])
+    adapter_sources = {name: profile_sources.pop(name) for name in ("dblp", "arxiv", "ieee_xplore") if name in profile_sources}
+    payload.update(profile_sources)
+    if adapter_sources:
+        payload["sources"] = adapter_sources
+    if "eligibility" in profile:
+        allowed_eligibility = {"control_policy"}
+        unknown = set(profile["eligibility"]) - allowed_eligibility
+        if unknown:
+            raise ValueError("profile.eligibility contains unknown fields: " + ", ".join(sorted(unknown)))
+        payload["eligibility"] = dict(profile["eligibility"])
+    payload["explicit_interests"] = list(profile["domains"])
+    priority = payload.setdefault("topic_priority", {})
+    priority["primary_topics"] = list(profile["primary"])
+    priority["exploration_topics"] = list(profile["exploration"])
+    digest = profile["digest"]
+    if "min_score" in digest:
+        payload["min_score"] = digest["min_score"]
+    if "quotas" in digest:
+        payload["digest"] = {"max_results": payload.get("max_results", 10), "quotas": dict(digest["quotas"])}
+    for name in DIGEST_KEYS - {"min_score", "quotas"}:
+        if name in digest:
+            priority[name] = digest[name]
+    topics = list(profile["primary"]) + list(profile["exploration"])
+    for name in ("arxiv", "ieee_xplore"):
+        source = payload.get("sources", {}).get(name) if isinstance(payload.get("sources"), dict) else None
+        if isinstance(source, dict) and source.get("enabled"):
+            source["topics"] = topics
 
 
 def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enabled: bool = True) -> None:
@@ -16,7 +172,16 @@ def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enab
     if missing:
         raise RuntimeError("missing Actions configuration: " + ", ".join(missing))
     payload = json.loads(base.read_text(encoding="utf-8"))
+    profile_raw = os.environ.get("PAPER_SCOUT_PROFILE_JSON")
+    if not profile_raw:
+        raise RuntimeError("missing Actions configuration: PAPER_SCOUT_PROFILE_JSON")
+    merge_profile(payload, load_profile(profile_raw))
     payload["max_results"] = max_results
+    if isinstance(payload.get("digest"), dict):
+        payload["digest"]["max_results"] = max_results
+        quotas = payload["digest"].get("quotas", {})
+        if sum(int(value) for value in quotas.values()) > max_results:
+            raise ValueError("profile.digest.quotas exceed runtime max_results")
     payload["seen_db"] = str(state_dir / "seen.json")
     payload["state_db"] = str(state_dir / "paper_scout.sqlite3")
     payload["run_lock"] = str(state_dir / "paper_scout.lock")
