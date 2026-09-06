@@ -149,8 +149,8 @@ def infer_semantic_profile(description: str) -> dict[str, Any]:
     })
 
 
-def profile_fingerprint(description: str, overrides: dict[str, Any], model: str) -> str:
-    payload = {"description": description, "overrides": overrides, "model": model, "schema": SCHEMA_VERSION, "prompt": PROMPT_VERSION, "taxonomy": TAXONOMY_VERSION}
+def profile_fingerprint(description: str, overrides: dict[str, Any], model: str, max_results: int) -> str:
+    payload = {"description": description, "overrides": overrides, "model": model, "max_results": max_results, "schema": SCHEMA_VERSION, "prompt": PROMPT_VERSION, "taxonomy": TAXONOMY_VERSION}
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
@@ -246,7 +246,7 @@ def call_profile_llm(description: str, llm: dict[str, Any]) -> dict[str, Any]:
 
 
 def resolve_profile(description: str, max_results: int, overrides: dict[str, Any], cache_path: Path, model: str, compiler: Callable[[str], dict[str, Any]]) -> dict[str, Any]:
-    fingerprint = profile_fingerprint(description, overrides, model)
+    fingerprint = profile_fingerprint(description, overrides, model, max_results)
     old = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else None
     if old and old.get("fingerprint") == fingerprint:
         return old["compiled"]
