@@ -254,7 +254,14 @@ def call_profile_llm(description: str, llm: dict[str, Any]) -> dict[str, Any]:
 
 def resolve_profile(description: str, max_results: int, overrides: dict[str, Any], cache_path: Path, model: str, compiler: Callable[[str], dict[str, Any]]) -> dict[str, Any]:
     fingerprint = profile_fingerprint(description, overrides, model, max_results)
-    old = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else None
+    old: dict[str, Any] | None = None
+    if cache_path.exists():
+        try:
+            candidate = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(candidate, dict) and isinstance(candidate.get("compiled"), dict):
+                old = candidate
+        except (OSError, json.JSONDecodeError):
+            old = None
     if old and old.get("fingerprint") == fingerprint:
         return old["compiled"]
     semantic = compiler(description)
