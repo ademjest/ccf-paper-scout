@@ -200,7 +200,7 @@ def compile_profile(description: str, semantic: dict[str, Any], max_results: int
         categories = category_override
     topics = semantic["primary_topics"] + semantic["exploration_topics"]
     sources = {
-        "dblp": {"enabled": bool(venues), "page_size": 100, "max_pages_per_venue": 3, "target_unseen_per_venue": 30, "stop_after_seen_pages": 2, "failure_policy": "continue", "minimum_success_ratio": 0.75, **dblp_override},
+        "dblp": {"enabled": bool(venues), "page_size": 100, "max_pages_per_venue": 3, "target_unseen_per_venue": 30, "stop_after_seen_pages": 2, "failure_policy": "continue", "minimum_success_ratio": 0.5, **dblp_override},
         "arxiv": {"enabled": True, "categories": categories, "topics": topics, "page_size": 30, "max_pages": 2, "max_age_days": 30, "request_delay_seconds": 3.0, "timeout_seconds": 60, "max_attempts": 3, "failure_policy": "continue", "reject_withdrawn": True, **arxiv_override},
         "ieee_xplore": {"enabled": wants_ieee and bool(os.environ.get("IEEE_XPLORE_API_KEY")), "topics": topics, "page_size": 30, "max_pages": 1, "timeout_seconds": 60, "failure_policy": "continue", **ieee_override},
     }
