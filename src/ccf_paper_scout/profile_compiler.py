@@ -96,12 +96,18 @@ def validate_semantic_profile(profile: dict[str, Any]) -> dict[str, Any]:
     if any(domain not in ALLOWED_DOMAINS for domain in domains):
         raise ValueError("semantic profile primary_domains contains unknown domain")
     exploration_domains = profile["exploration_domains"]
-    if not isinstance(exploration_domains, list) or len(exploration_domains) > 5 or any(domain not in ALLOWED_DOMAINS for domain in exploration_domains):
+    if not isinstance(exploration_domains, list) or len(exploration_domains) > 5 or any(not isinstance(domain, str) or not domain.strip() for domain in exploration_domains):
         raise ValueError("semantic profile exploration_domains is invalid")
+    exploration_domains = [domain.strip() for domain in exploration_domains]
+    if any(domain not in ALLOWED_DOMAINS for domain in exploration_domains):
+        raise ValueError("semantic profile exploration_domains is invalid")
+    profile["primary_domains"] = domains
+    profile["exploration_domains"] = exploration_domains
     profile["primary_topics"] = _strings(profile["primary_topics"], "primary_topics", 12)
     topics = profile["exploration_topics"]
     if not isinstance(topics, list) or len(topics) > 8 or any(not isinstance(topic, str) or not topic.strip() or len(topic) > 100 for topic in topics):
         raise ValueError("semantic profile exploration_topics is invalid")
+    profile["exploration_topics"] = [topic.strip() for topic in topics]
     if profile["formal_preference"] not in {"low", "medium", "high"} or profile["preprint_preference"] not in {"low", "medium", "high"}:
         raise ValueError("semantic profile preferences are invalid")
     return profile
@@ -159,8 +165,9 @@ def _unique(values: list[str]) -> list[str]:
 
 
 def _quotas(max_results: int, semantic: dict[str, Any]) -> dict[str, int]:
-    exploration = 1 if semantic["exploration_topics"] or semantic["exploration_domains"] else 0
-    preprint = 1 if semantic["preprint_preference"] == "low" else min(2 if semantic["preprint_preference"] == "medium" else 3, max_results - exploration)
+    exploration = min(1 if semantic["exploration_topics"] or semantic["exploration_domains"] else 0, max_results)
+    requested_preprint = 1 if semantic["preprint_preference"] == "low" else 2 if semantic["preprint_preference"] == "medium" else 3
+    preprint = min(requested_preprint, max(0, max_results - exploration))
     return {"formal": max(0, max_results - preprint - exploration), "preprint": preprint, "exploration": exploration}
 
 
