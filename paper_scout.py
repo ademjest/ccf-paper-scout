@@ -33,6 +33,7 @@ from ccf_paper_scout.models import Paper, SourceEvidence
 from ccf_paper_scout.sources.arxiv import ArxivSource
 from ccf_paper_scout.sources.ieee_xplore import IeeeXploreSource
 from ccf_paper_scout.eligibility.control import apply_control_policy
+from ccf_paper_scout import profile_compiler
 
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#-]{1,}|[\u4e00-\u9fff]{2,}")
 ANALYSIS_SCHEMA_VERSION = 1
@@ -103,6 +104,22 @@ def load_json(path: Path, default: Any = None) -> Any:
         raise FileNotFoundError(path)
     with path.open(encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_runtime_config(path: Path) -> dict[str, Any]:
+    config = load_json(path)
+    profile = config.get("profile")
+    if not isinstance(profile, dict) or not str(profile.get("description", "")).strip():
+        return config
+    config = dict(config)
+    profile = dict(profile)
+    if not profile.get("cache"):
+        state_path = Path(str(config.get("state_db", "state/paper_scout.sqlite3")))
+        if not state_path.is_absolute():
+            state_path = path.resolve().parent / state_path
+        profile["cache"] = str(state_path.parent / "compiled-profile.json")
+    config["profile"] = profile
+    return profile_compiler.apply_natural_language_profile(config)
 
 
 def open_json(req: str | urllib.request.Request, timeout: int = 30, attempts: int = 3) -> Any:
@@ -1290,7 +1307,7 @@ def main() -> int:
     parser.add_argument("--no-update-seen", action="store_true")
     parser.add_argument("--test-delivery", action="store_true", help="send one SMTP test message and exit without fetching or updating seen state")
     args = parser.parse_args()
-    config = load_json(args.config)
+    config = load_runtime_config(args.config)
     if args.test_delivery:
         smtp_config = config.get("delivery", {}).get("smtp", {})
         subject = str(smtp_config.get("subject", "CCF Paper Scout") + " — SMTP test")

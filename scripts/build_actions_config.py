@@ -8,6 +8,8 @@ import os
 import math
 from pathlib import Path
 
+from ccf_paper_scout.profile_compiler import call_profile_llm, resolve_profile, validate_discovery_overrides
+
 PROFILE_KEYS = {"version", "sources", "domains", "primary", "exploration", "digest", "eligibility"}
 SOURCE_KEYS = {"years", "venue_keys", "zotero_collection_keys", "recent_interest_items", "zotero_dedup_items", "openalex_enrich_limit", "dblp", "arxiv", "ieee_xplore"}
 DIGEST_KEYS = {"min_score", "primary_topic_boost", "exploration_topic_boost", "max_exploration_results", "quotas"}
@@ -164,6 +166,17 @@ def merge_profile(payload: dict[str, object], profile: dict[str, object]) -> Non
             source["topics"] = topics
 
 
+def load_discovery(raw: str) -> dict[str, object]:
+    try:
+        discovery = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"PAPER_SCOUT_DISCOVERY_JSON must be valid JSON: {exc.msg}") from None
+    if not isinstance(discovery, dict):
+        raise ValueError("PAPER_SCOUT_DISCOVERY_JSON must be a JSON object")
+    _reject_credential_keys(discovery, "discovery")
+    return validate_discovery_overrides(discovery)
+
+
 def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enabled: bool = True) -> None:
     if not 1 <= max_results <= 20:
         raise ValueError("max_results must be 1..20")
@@ -172,10 +185,21 @@ def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enab
     if missing:
         raise RuntimeError("missing Actions configuration: " + ", ".join(missing))
     payload = json.loads(base.read_text(encoding="utf-8"))
-    profile_raw = os.environ.get("PAPER_SCOUT_PROFILE_JSON")
-    if not profile_raw:
-        raise RuntimeError("missing Actions configuration: PAPER_SCOUT_PROFILE_JSON")
-    merge_profile(payload, load_profile(profile_raw))
+    profile_raw = os.environ.get("PAPER_SCOUT_PROFILE_JSON", "").strip()
+    profile_text = os.environ.get("PAPER_SCOUT_PROFILE_TEXT", "").strip()
+    if profile_raw:
+        merge_profile(payload, load_profile(profile_raw))
+    elif profile_text:
+        discovery_raw = os.environ.get("PAPER_SCOUT_DISCOVERY_JSON", "").strip()
+        discovery = load_discovery(discovery_raw) if discovery_raw else {}
+        llm = {"base_url": os.environ["LLM_BASE_URL"], "model": os.environ["LLM_MODEL"],
+               "api_key_env": "LLM_API_KEY", "timeout_seconds": 90}
+        compiled = resolve_profile(profile_text, max_results, discovery,
+                                   state_dir / "compiled-profile.json", os.environ["LLM_MODEL"],
+                                   lambda text: call_profile_llm(text, llm))
+        payload.update(compiled)
+    else:
+        raise RuntimeError("missing Actions configuration: PAPER_SCOUT_PROFILE_JSON or PAPER_SCOUT_PROFILE_TEXT")
     payload["max_results"] = max_results
     if isinstance(payload.get("digest"), dict):
         payload["digest"]["max_results"] = max_results

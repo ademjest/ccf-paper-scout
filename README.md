@@ -68,6 +68,98 @@ ccf-paper-scout run \
 
 ## 主要配置
 
+### 推荐方式：只写一次自然语言个人画像
+
+升级版支持由 LLM 将自然语言画像编译为稳定的结构化兴趣设置。普通用户只需在本地 `config.json` 中填写：
+
+```json
+{
+  "profile": {
+    "description": "我的研究领域是强化学习，对 RL、MARL、LLM+RL 等方向比较感兴趣，主要聚焦 RL，也希望阅读少量其他 AI 领域论文拓展视野。"
+  },
+  "max_results": 10
+}
+```
+
+程序只在首次运行或画像/数据源覆盖发生变化时调用 LLM；编译结果保存到私人状态中的
+`compiled-profile.json`，后续运行直接复用。如果画像和覆盖配置没有变化，即使 LLM 暂时不可用也会继续使用匹配缓存；如果用户已修改画像但新画像编译失败，系统会安全停止，不会悄悄沿用与新描述不匹配的旧画像。
+
+GitHub Actions 使用 Secret `PAPER_SCOUT_PROFILE_TEXT` 保存同一段自然语言。高级用户仍可继续使用
+`PAPER_SCOUT_PROFILE_JSON`；若两者同时存在，结构化 JSON 优先。
+
+### 可选数据源覆盖
+
+系统会为未设置的数据源字段自动选择安全默认值。用户显式设置永远优先：
+
+```text
+用户显式 discovery 设置 > 画像自动推断 > 系统安全默认值
+```
+
+本地配置示例：
+
+```json
+{
+  "discovery": {
+    "years": [2026, 2025],
+    "dblp": {
+      "enabled": true,
+      "venue_keys": ["nips", "icml", "aaai"]
+    },
+    "arxiv": {
+      "enabled": true,
+      "categories": ["cs.LG", "stat.ML", "cs.AI"],
+      "max_age_days": 30
+    },
+    "ieee_xplore": {"enabled": false}
+  }
+}
+```
+
+Actions 中可将同一对象（只放 `discovery` 的内容）设置为可选 Secret `PAPER_SCOUT_DISCOVERY_JSON`。
+省略字段表示自动推断；`enabled: false` 表示明确关闭；`venue_keys` 和 `categories` 如需自定义必须提供非空列表。
+
+#### `years` 选择
+
+省略时自动使用当前年份和上一年份。DBLP 在年初可能尚未完整索引当年记录，保留上一年可减少漏检。自定义时允许 1–5 个年份，例如：
+
+```json
+"years": [2026, 2025, 2024]
+```
+
+#### DBLP `venue_keys` 参考
+
+`venue_keys` 是本项目 CCF-A/DBLP 映射中的内部 key，不是任意会议全称。常见组合：
+
+| 方向 | 建议 key |
+|---|---|
+| RL / 机器学习 | `nips`, `icml`, `aaai` |
+| 计算机视觉 | `cvpr`, `iccv` |
+| NLP | `acl`, `aaai` |
+| 数据挖掘 / 推荐 | `kdd`, `sigir` |
+| 综合 AI 拓展 | `nips`, `icml`, `aaai`, `cvpr`, `acl`, `kdd`, `sigir` |
+
+不建议无差别开启所有 Venue；这会增加运行时间和主题噪声。Venue 映射代表发现范围，不是对单篇论文质量的官方认证。
+
+#### arXiv Category 参考
+
+arXiv Category 决定预印本发现范围，仍会与画像解析出的主题做联合查询。常用设置：
+
+| 方向 | 建议 Category |
+|---|---|
+| 机器学习、RL、MARL | `cs.LG`, `stat.ML`, `cs.AI` |
+| NLP、LLM | `cs.CL`, `cs.AI`, `cs.LG` |
+| 计算机视觉 | `cs.CV`, `cs.LG` |
+| 机器人 | `cs.RO`, `eess.SY`, `cs.LG` |
+| 系统与控制 | `eess.SY`, `math.OC` |
+| 机器人与学习控制 | `cs.RO`, `eess.SY`, `math.OC`, `cs.LG` |
+
+**特别注意：arXiv 没有 `cs.ML`，机器学习应使用 `cs.LG`。** 配置 `cs.ML` 会被校验器拒绝并提示改用 `cs.LG`。完整分类以
+<https://arxiv.org/category_taxonomy> 为准。Category 不是质量评级；只使用宽泛的 `cs.AI` 可能产生较多噪声。
+
+#### 修改画像
+
+无需手动清理缓存。修改本地 `profile.description`、`discovery`，或 Actions 中相应 Secret 后，指纹会变化并自动重新编译。修改生产画像时建议先暂停 Daily workflow，更新 Secret 后再重新启用，以避免恰好运行中的任务继续使用旧值。
+
 编辑复制得到的 `config.json`：
 
 - `years`：检索年份；
@@ -118,7 +210,7 @@ GitHub Actions 无法读取用户电脑上的 `config.json`。云端流程为：
 → workflow 结束后 runner 被销毁
 ```
 
-`config.action.json` 不会提交到代码仓库、状态仓库或 Artifact。生产日志默认不输出完整配置、具体兴趣词、论文标题或报告正文。注意：能修改默认分支 workflow 的维护者理论上可以让 workflow 读取 Secrets，因此公开 Fork 的使用者应保护仓库写权限、审核 workflow 改动，并且不要让不受信任的 pull request 在可访问生产 Secrets 的事件中运行。
+`config.action.json` 不会提交到代码仓库、状态仓库或 Artifact。自然语言原文也不会写入状态仓库；私人状态只缓存画像指纹和已编译的结构化策略。生产日志默认不输出完整配置、具体兴趣词、论文标题或报告正文。注意：能修改默认分支 workflow 的维护者理论上可以让 workflow 读取 Secrets，因此公开 Fork 的使用者应保护仓库写权限、审核 workflow 改动，并且不要让不受信任的 pull request 在可访问生产 Secrets 的事件中运行。
 
 ### 1. 创建私有状态仓库
 
@@ -158,6 +250,8 @@ LLM_API_KEY
 LLM_BASE_URL
 LLM_MODEL
 IEEE_XPLORE_API_KEY
+PAPER_SCOUT_PROFILE_TEXT
+PAPER_SCOUT_DISCOVERY_JSON
 PAPER_SCOUT_PROFILE_JSON
 STATE_REPO_TOKEN
 ```
@@ -168,6 +262,7 @@ STATE_REPO_TOKEN
 - QQ 邮箱默认使用 `smtp.qq.com:465` 和 SSL；
 - `STATE_REPO_TOKEN` 建议使用只授权私有状态仓库、Contents read/write 的 fine-grained token；
 - 所有 Secret 都不得出现在 Issue、PR、日志或配置文件中。
+- 推荐普通用户只设置 `PAPER_SCOUT_PROFILE_TEXT`；`PAPER_SCOUT_DISCOVERY_JSON` 是可选数据源覆盖；`PAPER_SCOUT_PROFILE_JSON` 是高级结构化覆盖。
 
 `PAPER_SCOUT_PROFILE_JSON` 必须是单个 JSON 对象，当前 schema version 为 `1`。顶层字段固定为
 `version`、`sources`、`domains`、`primary`、`exploration`、`digest`，以及可选的 `eligibility`；未知字段和任何类似凭据的 key

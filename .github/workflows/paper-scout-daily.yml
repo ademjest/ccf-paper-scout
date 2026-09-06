@@ -39,10 +39,29 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           PAPER_SCOUT_PROFILE_JSON: ${{ secrets.PAPER_SCOUT_PROFILE_JSON }}
+          PAPER_SCOUT_PROFILE_TEXT: ${{ secrets.PAPER_SCOUT_PROFILE_TEXT }}
+          PAPER_SCOUT_DISCOVERY_JSON: ${{ secrets.PAPER_SCOUT_DISCOVERY_JSON }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
         run: python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results 10
       - name: Verify generated runtime config
         run: |
           python -c 'import json; value=json.load(open("config.action.json"))["max_results"]; assert value == 10; print("Runtime max_results:", value)'
+      - name: Persist compiled profile state
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+        working-directory: .runtime-state
+        run: |
+          python ../scripts/actions_state.py checkpoint --dir state
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/compiled-profile.json
+          if ! git diff --cached --quiet; then
+            git commit -m "state: update compiled profile ${GITHUB_RUN_ID}"
+            basic=$(printf 'x-access-token:*** "$STATE_REPO_TOKEN" | base64 -w0)
+            git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ***" pull --rebase origin main
+            git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ***" push origin HEAD:main
+          fi
       - name: Doctor
         env:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
