@@ -60,7 +60,7 @@ jobs:
           fi
           if ! git diff --cached --quiet; then
             git commit -m "state: update compiled profile ${GITHUB_RUN_ID}"
-            basic=$(printf 'x-access-token:*** "$STATE_REPO_TOKEN" | base64 -w0)
+            basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
             git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ***" pull --rebase origin main
             git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ***" push origin HEAD:main
           fi
