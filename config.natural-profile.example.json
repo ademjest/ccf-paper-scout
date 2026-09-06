@@ -49,8 +49,8 @@
       "host": "smtp.qq.com",
       "port": 465,
       "use_ssl": true,
-      "sender": "3111236810@qq.com",
-      "receiver": "m202573914@hust.edu.cn",
+      "sender": "sender@example.com",
+      "receiver": "receiver@example.com",
       "password_env": "SMTP_PASSWORD",
       "subject": "CCF Paper Scout 本地预览",
       "timeout_seconds": 60
