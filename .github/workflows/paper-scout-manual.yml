@@ -73,7 +73,9 @@ jobs:
           python ../scripts/actions_state.py checkpoint --dir state
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state/compiled-profile.json
+          if [ -f state/compiled-profile.json ]; then
+            git add state/compiled-profile.json
+          fi
           if ! git diff --cached --quiet; then
             git commit -m "state: update compiled profile ${GITHUB_RUN_ID}"
             basic=$(printf 'x-access-token:*** "$STATE_REPO_TOKEN" | base64 -w0)
