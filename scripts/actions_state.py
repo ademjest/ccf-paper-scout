@@ -8,7 +8,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-ALLOWED = {"paper_scout.sqlite3", "seen.json", "translations.json", ".delivery-pending", "delivery-recovery-audit.jsonl", ".gitignore", "README.md"}
+ALLOWED = {"paper_scout.sqlite3", "seen.json", "translations.json", "compiled-profile.json", ".delivery-pending", "delivery-recovery-audit.jsonl", ".gitignore", "README.md"}
 RUNTIME_SUFFIXES = (".lock", ".sqlite3-wal", ".sqlite3-shm")
 
 

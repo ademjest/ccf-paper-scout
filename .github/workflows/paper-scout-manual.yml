@@ -53,18 +53,42 @@ jobs:
           SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          PAPER_SCOUT_PROFILE_JSON: ${{ secrets.PAPER_SCOUT_PROFILE_JSON }}
+          PAPER_SCOUT_PROFILE_TEXT: ${{ secrets.PAPER_SCOUT_PROFILE_TEXT }}
+          PAPER_SCOUT_DISCOVERY_JSON: ${{ secrets.PAPER_SCOUT_DISCOVERY_JSON }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
         run: |
           case "$REQUESTED_MAX_RESULTS" in (*[!0-9]*|'') echo "max_results must be an integer"; exit 2;; esac
           if [ "$REQUESTED_MAX_RESULTS" -lt 1 ] || [ "$REQUESTED_MAX_RESULTS" -gt 20 ]; then echo "max_results must be 1..20"; exit 2; fi
           EXTRA=""
           if [ "$REQUESTED_MODE" = "preview" ]; then EXTRA="--disable-smtp"; fi
           python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results "$REQUESTED_MAX_RESULTS" $EXTRA
+      - name: Persist compiled profile state
+        if: inputs.mode == 'preview' || inputs.mode == 'production'
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+        working-directory: .runtime-state
+        run: |
+          python ../scripts/actions_state.py checkpoint --dir state
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -f state/compiled-profile.json ]; then
+            git add state/compiled-profile.json
+          fi
+          if ! git diff --cached --quiet; then
+            git commit -m "state: update compiled profile ${GITHUB_RUN_ID}"
+            basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
+            git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ***" pull --rebase origin main
+            git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ***" push origin HEAD:main
+          fi
       - name: Doctor
         if: inputs.mode == 'doctor'
         env:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
         run: ccf-paper-scout doctor --config config.action.json
       - name: SMTP test
         if: inputs.mode == 'smtp-test'
@@ -77,6 +101,7 @@ jobs:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
         run: ccf-paper-scout run --config config.action.json --output recommendations.md --no-update-seen
       - name: Check unresolved delivery transaction
         if: inputs.mode == 'production'
@@ -92,6 +117,7 @@ jobs:
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
           PAPER_SCOUT_DELIVERY_GATE: .runtime-state/state/.delivery-approved
         run: |
@@ -123,11 +149,3 @@ jobs:
             basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
             git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
           fi
-      - name: Upload preview report
-        if: inputs.mode == 'preview' && success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: paper-scout-${{ inputs.mode }}-${{ github.run_id }}
-          path: recommendations.md
-          if-no-files-found: ignore
-          retention-days: 7

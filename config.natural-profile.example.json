@@ -1,0 +1,64 @@
+{
+  "profile": {
+    "description": "Describe your primary research area, important subtopics, and how much adjacent exploration you want.",
+    "compiler": {
+      "base_url": "https://api.example.com/v1",
+      "model": "your-model",
+      "api_key_env": "LLM_API_KEY",
+      "timeout_seconds": 90
+    },
+    "cache": ".local-test-state/compiled-profile.json"
+  },
+  "max_results": 10,
+  "discovery": {
+    "years": [2026, 2025],
+    "dblp": {
+      "enabled": true,
+      "venue_keys": ["nips", "icml", "aaai", "kdd", "sigir", "acl"]
+    },
+    "arxiv": {
+      "enabled": true,
+      "categories": ["cs.LG", "stat.ML", "cs.AI"],
+      "max_age_days": 30
+    },
+    "ieee_xplore": {
+      "enabled": false
+    }
+  },
+  "openalex_enrich_limit": 60,
+  "recent_interest_items": 200,
+  "zotero_dedup_items": 0,
+  "zotero_collection_keys": [],
+  "debug": {
+    "list_zotero_items": false,
+    "log_paper_titles": true,
+    "zotero_output": "local-notes/zotero-library-debug.md"
+  },
+  "llm_translation": {
+    "enabled": true,
+    "base_url": "https://api.example.com/v1",
+    "model": "your-model",
+    "api_key_env": "LLM_API_KEY",
+    "language": "简体中文",
+    "timeout_seconds": 90,
+    "cache": ".local-test-state/translations.json"
+  },
+  "delivery": {
+    "smtp": {
+      "enabled": false,
+      "host": "smtp.qq.com",
+      "port": 465,
+      "use_ssl": true,
+      "sender": "sender@example.com",
+      "receiver": "receiver@example.com",
+      "password_env": "SMTP_PASSWORD",
+      "subject": "CCF Paper Scout 本地预览",
+      "timeout_seconds": 60
+    }
+  },
+  "seen_db": ".local-test-state/seen.json",
+  "state_db": ".local-test-state/paper_scout.sqlite3",
+  "run_lock": ".local-test-state/paper_scout.lock",
+  "request_delay_seconds": 2.0,
+  "user_agent": "ccf-paper-scout/0.4 (natural-language profile)"
+}

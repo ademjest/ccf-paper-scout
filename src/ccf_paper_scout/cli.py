@@ -26,7 +26,7 @@ def doctor(config_path: Path, network: bool = True) -> int:
     failures = 0
     try:
         config = load_config(config_path)
-        print(f"config: ok ({config_path})")
+        print("config: ok")
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"config: failed — {exc}")
         return 2
@@ -35,6 +35,12 @@ def doctor(config_path: Path, network: bool = True) -> int:
         print(f"{name}: {'present length=' + str(len(value)) if value else 'missing'}")
         failures += not bool(value)
     smtp = config.get("delivery", {}).get("smtp", {})
+    ieee = config.get("sources", {}).get("ieee_xplore", {})
+    if isinstance(ieee, dict) and ieee.get("enabled"):
+        ieee_env = str(ieee.get("api_key_env", "IEEE_XPLORE_API_KEY"))
+        ieee_key = os.environ.get(ieee_env, "")
+        print(f"{ieee_env}: {'present length=' + str(len(ieee_key)) if ieee_key else 'missing'}")
+        failures += not bool(ieee_key)
     if smtp.get("enabled"):
         for field in ("host", "port", "sender", "receiver"):
             present = bool(smtp.get(field))
@@ -60,7 +66,7 @@ def doctor(config_path: Path, network: bool = True) -> int:
     state_dir = state_path.parent
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
-        print(f"state path: writable ({state_dir})")
+        print("state path: writable")
     except OSError as exc:
         print(f"state path: failed — {exc}")
         failures += 1

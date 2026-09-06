@@ -16,7 +16,11 @@ dependencies = []
 ccf-paper-scout = "ccf_paper_scout.cli:main"
 
 [tool.setuptools]
-packages = ["ccf_paper_scout"]
+packages = [
+  "ccf_paper_scout",
+  "ccf_paper_scout.sources",
+  "ccf_paper_scout.eligibility",
+]
 py-modules = ["paper_scout", "state_store"]
 package-dir = {"ccf_paper_scout" = "src/ccf_paper_scout"}
 
