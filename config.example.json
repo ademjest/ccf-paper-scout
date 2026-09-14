@@ -7,7 +7,11 @@
     "target_unseen_per_venue": 30,
     "stop_after_seen_pages": 2,
     "failure_policy": "continue",
-    "minimum_success_ratio": 0.75
+    "minimum_success_ratio": 0.75,
+    "request_delay_seconds": 3.0,
+    "timeout_seconds": 30,
+    "max_attempts": 3,
+    "sparql_fallback": true
   },
   "max_results": 10,
   "min_score": 0.01,
@@ -60,6 +64,5 @@
   "seen_db": "state/seen.json",
   "state_db": "state/paper_scout.sqlite3",
   "run_lock": "state/paper_scout.lock",
-  "request_delay_seconds": 2.0,
-  "user_agent": "ccf-paper-scout/0.1 (personal research recommender)"
+  "user_agent": "ccf-paper-scout/0.2 (+https://github.com/ademjest/ccf-paper-scout)"
 }

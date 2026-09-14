@@ -14,7 +14,7 @@ CCF Paper Scout 是一个面向个人研究者的自动论文推荐程序。它�
 GitHub Actions
   → 恢复私有状态
   → 读取 Zotero 兴趣文献
-  → 分页检索 DBLP
+  → 分页检索 DBLP Search API，受阻时自动切换 DBLP SPARQL
   → CCF-A 白名单与 DBLP record-key 校验
   → 排除已推送论文和 Zotero 已收藏论文
   → 本地相关性排序与主题优先级
@@ -76,7 +76,7 @@ ccf-paper-scout run \
 
 - `years`：检索年份；
 - `venue_keys`：允许检索的 DBLP venue key；
-- `dblp`：分页、重试和部分数据源失败策略；
+- `dblp`：分页、全局限速、瞬时错误重试、SPARQL 降级和部分分区失败策略；
 - `max_results`：每次最多推荐数量，当前默认 10；
 - `min_score`：最低相关性分数；
 - `explicit_interests`：显式主要研究方向；
@@ -89,6 +89,18 @@ ccf-paper-scout run \
 - `state_db`、`seen_db`：SQLite 和兼容去重状态路径。
 
 私人凭据只能通过环境变量或 GitHub Actions Secrets 提供，不要写入 `config.json` 或提交到 Git。
+
+### DBLP 可用性与降级
+
+DBLP Search API 可能对云端出口返回 HTTP 200 的反机器人 HTML 页面。程序会先检查
+`Content-Type` 和正文特征，不会把验证页面当作 JSON 重试；两个 Search API 域名均不可用时，
+当前进程会熔断搜索接口并自动使用官方 SPARQL 服务。`dblp.request_delay_seconds` 应保持至少
+2–3 秒，使所有 DBLP 请求共享同一个进程级间隔。`dblp.max_attempts` 只作用于 429、5xx、
+超时和连接中断，不作用于反机器人页面或结构错误。
+
+如果 Search API 与 SPARQL 都不可用，系统仍按 `minimum_success_ratio` 停止投递，避免在来源
+严重不完整时发送看似正常的日报。详细设计和恢复步骤见
+[`docs/dblp-resilience-improvement.md`](docs/dblp-resilience-improvement.md)。
 
 ## 本地命令
 
@@ -215,6 +227,7 @@ src/ccf_paper_scout/data/ccf_a_venues.json
 ## 能力边界
 
 - DBLP 已索引的正式论文不等于最新投稿或预印本；
+- DBLP Search API 和 SPARQL 都是外部服务；自动降级可以减少单点故障，但不能提供可用性 SLA；
 - OpenAlex 可能缺少摘要；
 - 当前排序器是可解释的稀疏词项算法，不是论文质量评分；
 - LLM 输出是基于标题和摘要的辅助解读，不等于阅读全文后的严格评审；

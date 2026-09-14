@@ -10,14 +10,11 @@ recommendations*.md
 zotero_library_debug.md
 *.log
 
-# Local-only development, tests, analysis, and planning artifacts
+# Local-only development and planning artifacts
 .hermes/
-docs/
-tests/
 /local-notes/
 *.private.md
 *.analysis.md
-.github/workflows/ci.yml
 RESEARCH.md
 ccf-paper-scout-improvement-plan.md
 项目完成度_MVP与算法逻辑说明.md

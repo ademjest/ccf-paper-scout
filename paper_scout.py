@@ -24,6 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from email.message import EmailMessage
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -44,6 +45,34 @@ STOP = {
     "state", "effective", "efficient", "robust", "however", "when", "where", "while", "across", "between",
     "all", "more", "most", "other", "over", "under", "both", "each", "any", "some", "many", "much",
 }
+
+DBLP_SPARQL_ENDPOINT = "https://sparql.dblp.org/sparql"
+_DBLP_LAST_REQUEST_AT = 0.0
+_DBLP_SEARCH_API_BLOCKED = False
+
+
+class DblpError(RuntimeError):
+    """Base class for failures returned by a DBLP machine endpoint."""
+
+
+class DblpBlockedError(DblpError):
+    """DBLP returned an anti-bot page instead of machine-readable data."""
+
+
+class DblpProtocolError(DblpError):
+    """DBLP returned a non-retryable response with an unexpected shape."""
+
+
+class DblpRequestError(DblpError):
+    """DBLP remained unavailable after bounded transient retries."""
+
+
+class DblpUnavailableError(DblpError):
+    """All configured DBLP access paths failed for one request."""
+
+    def __init__(self, message: str, *, global_failure: bool = False):
+        super().__init__(message)
+        self.global_failure = global_failure
 
 
 class RunLock:
@@ -126,30 +155,99 @@ def request_json(url: str, user_agent: str, timeout: int = 30) -> dict[str, Any]
     return open_json(req, timeout=timeout)
 
 
-def request_dblp_json(url: str, user_agent: str, timeout: int = 30) -> dict[str, Any]:
-    """DBLP-specific bounded retry policy with Retry-After support."""
-    request = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
+def _wait_for_dblp_slot(minimum_interval_seconds: float) -> None:
+    """Apply one process-wide delay between every DBLP HTTP request."""
+    global _DBLP_LAST_REQUEST_AT
+    interval = max(0.0, float(minimum_interval_seconds))
+    now = time.monotonic()
+    wait = interval - (now - _DBLP_LAST_REQUEST_AT)
+    if _DBLP_LAST_REQUEST_AT and wait > 0:
+        time.sleep(wait)
+    _DBLP_LAST_REQUEST_AT = time.monotonic()
+
+
+def _retry_after_seconds(value: str | None, attempt: int) -> float:
+    fallback = 2 ** (attempt + 1) + random.uniform(0.0, 1.0)
+    if value is None:
+        return fallback
+    try:
+        return max(fallback, float(value))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=dt.timezone.utc)
+            return max(fallback, (retry_at - dt.datetime.now(dt.timezone.utc)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return fallback
+
+
+def _decode_dblp_json(response: Any, url: str) -> dict[str, Any]:
+    raw = response.read()
+    headers = response.headers
+    if hasattr(headers, "get_content_type"):
+        content_type = str(headers.get_content_type()).lower()
+        charset = headers.get_content_charset() or "utf-8"
+    else:
+        content_type = str(headers.get("Content-Type", "")).split(";", 1)[0].strip().lower()
+        charset = "utf-8"
+    text = raw.decode(charset, errors="replace")
+    lowered = text[:1000].lower()
+    if ("making sure you" in lowered and "not a bot" in lowered) or "/.within.website/" in lowered:
+        raise DblpBlockedError(f"DBLP anti-bot challenge returned by {urllib.parse.urlsplit(url).netloc}")
+    looks_json = text.lstrip().startswith(("{", "["))
+    if not (content_type == "application/json" or content_type.endswith("+json") or looks_json):
+        sample = " ".join(text[:160].split())
+        raise DblpProtocolError(
+            f"DBLP returned {content_type or 'unknown content type'} instead of JSON from "
+            f"{urllib.parse.urlsplit(url).netloc}: {sample or '(empty response)'}"
+        )
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise DblpProtocolError(
+            f"DBLP returned invalid JSON from {urllib.parse.urlsplit(url).netloc}: {exc.msg}"
+        ) from None
+    if not isinstance(payload, dict):
+        raise DblpProtocolError(f"DBLP returned a non-object JSON payload from {urllib.parse.urlsplit(url).netloc}")
+    return payload
+
+
+def request_dblp_json(
+    url: str,
+    user_agent: str,
+    timeout: int = 30,
+    attempts: int = 3,
+    minimum_interval_seconds: float = 0.0,
+    accept: str = "application/json",
+) -> dict[str, Any]:
+    """Request DBLP JSON, retrying only transient transport and HTTP failures."""
+    request = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": accept})
     last: Exception | None = None
-    for attempt in range(5):
+    attempts = max(1, min(5, int(attempts)))
+    for attempt in range(attempts):
+        _wait_for_dblp_slot(minimum_interval_seconds)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                return json.load(response)
+                return _decode_dblp_json(response, url)
+        except (DblpBlockedError, DblpProtocolError):
+            raise
         except urllib.error.HTTPError as exc:
             if exc.code not in (429, 500, 502, 503, 504):
-                raise
+                raise DblpProtocolError(
+                    f"DBLP returned non-retryable HTTP {exc.code} from {urllib.parse.urlsplit(url).netloc}"
+                ) from None
             last = exc
-            if attempt < 4:
+            if attempt < attempts - 1:
                 retry_after = exc.headers.get("Retry-After") if exc.headers else None
-                try:
-                    delay = float(retry_after) if retry_after is not None else 0.0
-                except ValueError:
-                    delay = 0.0
-                time.sleep(max(delay, 2 ** (attempt + 1) + random.uniform(0.0, 1.0)))
-        except (urllib.error.URLError, TimeoutError, http.client.RemoteDisconnected, json.JSONDecodeError) as exc:
+                time.sleep(_retry_after_seconds(retry_after, attempt))
+        except (urllib.error.URLError, TimeoutError, http.client.RemoteDisconnected) as exc:
             last = exc
-            if attempt < 4:
+            if attempt < attempts - 1:
                 time.sleep(2 ** (attempt + 1) + random.uniform(0.0, 1.0))
-    raise RuntimeError(f"DBLP request failed after 5 attempts: {url}: {last}")
+    raise DblpRequestError(
+        f"DBLP request failed after {attempts} attempts via {urllib.parse.urlsplit(url).netloc}: {last}"
+    )
 
 
 def clean_text(value: Any) -> str:
@@ -316,9 +414,15 @@ def format_zotero_debug(papers: list[dict[str, str]]) -> str:
 
 
 def fetch_dblp_page(
-    venue: dict[str, Any], year: int, limit: int, start: int, user_agent: str
+    venue: dict[str, Any], year: int, limit: int, start: int, user_agent: str,
+    request_config: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], int | None, int]:
     """Fetch one DBLP search page and return verified records plus reported total."""
+    global _DBLP_SEARCH_API_BLOCKED
+    request_config = request_config or {}
+    timeout = int(request_config.get("timeout_seconds", 30))
+    attempts = int(request_config.get("max_attempts", 3))
+    interval = float(request_config.get("request_delay_seconds", 0.0))
     query = f"venue:{venue['abbr'] or venue['dblp_key']}: year:{year}:"
     params = urllib.parse.urlencode({"q": query, "h": limit, "f": start, "format": "json"})
     endpoints = (
@@ -326,14 +430,34 @@ def fetch_dblp_page(
         "https://dblp.uni-trier.de/search/publ/api?" + params,
     )
     errors: list[str] = []
-    for url in endpoints:
+    blocked = _DBLP_SEARCH_API_BLOCKED
+    payload: dict[str, Any] | None = None
+    if not _DBLP_SEARCH_API_BLOCKED:
+        for url in endpoints:
+            try:
+                payload = request_dblp_json(url, user_agent, timeout, attempts, interval)
+                break
+            except DblpBlockedError as exc:
+                blocked = True
+                errors.append(str(exc))
+            except DblpError as exc:
+                errors.append(str(exc))
+        if payload is None and blocked:
+            _DBLP_SEARCH_API_BLOCKED = True
+            print("source=DBLP search_api=blocked fallback=sparql", file=sys.stderr)
+    if payload is None and bool(request_config.get("sparql_fallback", True)):
         try:
-            payload = request_dblp_json(url, user_agent)
-            break
-        except RuntimeError as exc:
+            return fetch_dblp_sparql_page(
+                venue, year, limit, start, user_agent,
+                timeout=timeout, attempts=attempts, minimum_interval_seconds=interval,
+            )
+        except DblpError as exc:
             errors.append(str(exc))
-    else:
-        raise RuntimeError("all DBLP endpoints failed: " + " | ".join(errors))
+    if payload is None:
+        raise DblpUnavailableError(
+            "all DBLP machine endpoints failed: " + " | ".join(errors),
+            global_failure=blocked,
+        )
     hits_payload = payload.get("result", {}).get("hits", {})
     try:
         total: int | None = int(hits_payload["@total"])
@@ -372,7 +496,84 @@ def fetch_dblp_page(
     return result, total, raw_count
 
 
-def resolve_dblp_config(config: dict[str, Any]) -> dict[str, int]:
+def fetch_dblp_sparql_page(
+    venue: dict[str, Any], year: int, limit: int, start: int, user_agent: str, *,
+    timeout: int = 30, attempts: int = 3, minimum_interval_seconds: float = 0.0,
+) -> tuple[list[dict[str, Any]], int | None, int]:
+    """Fetch one venue/year page from DBLP's machine-oriented SPARQL endpoint."""
+    key = str(venue["dblp_key"]).lower()
+    if not re.fullmatch(r"[a-z0-9-]+", key):
+        raise DblpProtocolError(f"unsafe DBLP venue key: {key}")
+    kind = "conf" if venue["type"] == "conference" else "journals"
+    record_type = "Inproceedings" if venue["type"] == "conference" else "Article"
+    stream = f"https://dblp.org/streams/{kind}/{key}"
+    query = f"""
+PREFIX dblp: <https://dblp.org/rdf/schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+SELECT ?publication ?title ?year ?doi ?document
+       (GROUP_CONCAT(DISTINCT ?authorName; separator="|||") AS ?authors)
+WHERE {{
+  ?publication a dblp:{record_type} ;
+               dblp:title ?title ;
+               dblp:yearOfPublication ?year ;
+               dblp:publishedInStream <{stream}> .
+  FILTER(?year = "{int(year)}"^^xsd:gYear)
+  OPTIONAL {{ ?publication dblp:doi ?doi }}
+  OPTIONAL {{ ?publication dblp:primaryDocumentPage ?document }}
+  OPTIONAL {{
+    ?publication dblp:authoredBy ?author .
+    ?author dblp:primaryCreatorName ?authorName
+  }}
+}}
+GROUP BY ?publication ?title ?year ?doi ?document
+ORDER BY ?publication
+LIMIT {max(1, int(limit))}
+OFFSET {max(0, int(start))}
+""".strip()
+    params = urllib.parse.urlencode({"query": query, "format": "json"})
+    url = DBLP_SPARQL_ENDPOINT + "?" + params
+    payload = request_dblp_json(
+        url, user_agent, timeout, attempts, minimum_interval_seconds,
+        "application/sparql-results+json",
+    )
+    bindings = payload.get("results", {}).get("bindings", [])
+    if not isinstance(bindings, list):
+        raise DblpProtocolError("DBLP SPARQL response is missing results.bindings")
+    prefix = f"{kind}/{key}/"
+    result: list[dict[str, Any]] = []
+    for binding in bindings:
+        if not isinstance(binding, dict):
+            continue
+        publication = str(binding.get("publication", {}).get("value", ""))
+        marker = "/rec/"
+        record_key = publication.split(marker, 1)[1] if marker in publication else ""
+        if not record_key.startswith(prefix):
+            continue
+        title = clean_text(binding.get("title", {}).get("value", ""))
+        if not title:
+            continue
+        document = clean_text(binding.get("document", {}).get("value", ""))
+        doi = normalize_doi(binding.get("doi", {}).get("value", ""))
+        authors_text = str(binding.get("authors", {}).get("value", ""))
+        result.append({
+            "id": record_key,
+            "title": title,
+            "authors": [clean_text(author) for author in authors_text.split("|||") if clean_text(author)],
+            "year": int(binding.get("year", {}).get("value", year)),
+            "venue": venue["abbr"] or venue["name"],
+            "venue_name": venue["name"],
+            "rank": venue["rank"],
+            "type": venue["type"],
+            "url": f"https://dblp.org/rec/{record_key}",
+            "ee": document,
+            "doi": doi,
+        })
+    raw_count = len(bindings)
+    total = start + raw_count if raw_count < limit else None
+    return result, total, raw_count
+
+
+def resolve_dblp_config(config: dict[str, Any]) -> dict[str, Any]:
     if "dblp" in config:
         return dict(config.get("dblp") or {})
     legacy = max(1, int(config.get("per_venue", 30)))
@@ -403,7 +604,7 @@ def fetch_dblp_incremental(
     zotero_skipped = 0
     for page_index in range(max_pages):
         start = page_index * page_size
-        page, total, raw_count = fetch_dblp_page(venue, year, page_size, start, user_agent)
+        page, total, raw_count = fetch_dblp_page(venue, year, page_size, start, user_agent, config)
         pages += 1
         fetched += len(page)
         raw_hits += raw_count
@@ -456,11 +657,21 @@ def collect_dblp_sources(
     stats: dict[str, Any] = {"raw_hits": 0, "delivered_skipped": 0, "zotero_skipped": 0, "pages": 0}
     total = len(requested) * len(years)
     successes = 0
+    global_failure: str | None = None
     for key in requested:
         venue = venue_by_key[key]
         for year in years:
             try:
                 papers, fetched = fetch_dblp_incremental(venue, int(year), config, user_agent, seen, zotero_identities)
+            except DblpUnavailableError as exc:
+                print(f"source=DBLP venue={venue.get('abbr') or key} year={year} status=failed error={exc}", file=sys.stderr)
+                failures.append({"venue": venue.get("abbr") or key, "year": int(year), "error": str(exc)})
+                if exc.global_failure:
+                    global_failure = str(exc)
+                    break
+                if policy == "strict":
+                    raise
+                continue
             except RuntimeError as exc:
                 print(f"source=DBLP venue={venue.get('abbr') or key} year={year} status=failed error={exc}", file=sys.stderr)
                 failures.append({"venue": venue.get("abbr") or key, "year": int(year), "error": str(exc)})
@@ -473,8 +684,15 @@ def collect_dblp_sources(
             for paper in papers:
                 candidates[paper["id"]] = paper
             print(f"source=DBLP venue={venue.get('abbr') or key} year={year} status=success pages={fetched['pages']} unseen={len(papers)}")
+        if global_failure:
+            break
     stats["success_ratio"] = successes / total if total else 1.0
     if stats["success_ratio"] < minimum:
+        if global_failure:
+            raise RuntimeError(
+                f"DBLP globally unavailable after search and SPARQL fallback; "
+                f"success ratio {stats['success_ratio']:.3f} below minimum {minimum:.3f}: {global_failure}"
+            )
         raise RuntimeError(f"DBLP success ratio {stats['success_ratio']:.3f} below minimum {minimum:.3f}")
     return candidates, stats, failures
 
