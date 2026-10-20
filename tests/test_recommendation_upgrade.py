@@ -142,6 +142,20 @@ class DiscoveryTests(StoreFixture, unittest.TestCase):
         self.assertFalse(failures)
         self.assertEqual(self.store.scan_state("aaai", 2027)["status"], "not_indexed_yet")
 
+    def test_populated_next_year_is_active_before_full_scan_finishes(self):
+        settings = self.config(max_pages_per_run=2)
+        fetch = mock.Mock(return_value=([paper(), paper(1)], None, 2))
+        discovery.discover(self.store, VENUES, [2026], settings, "test", fetch, probe_year=2027)
+        self.assertTrue(self.store.scan_state("aaai", 2027)["has_records"])
+
+        def fail_future(venue, year, *args):
+            if year == 2027:
+                raise RuntimeError("future-year source failed")
+            return [paper(), paper(1)], None, 2
+
+        with self.assertRaisesRegex(RuntimeError, "success ratio"):
+            discovery.discover(self.store, VENUES, [2026], settings, "test", fail_future, probe_year=2027)
+
     def test_bootstrap_and_later_discoveries_are_distinguished(self):
         discovery.discover(self.store, VENUES, [2026], self.config(), "test", mock.Mock(return_value=([paper()], 1, 1)))
         state = self.store.scan_state("aaai", 2026)
@@ -260,6 +274,19 @@ class SemanticTests(StoreFixture, unittest.TestCase):
 
 
 class PipelineTests(StoreFixture, unittest.TestCase):
+    def test_failed_partition_does_not_recommend_stale_cached_papers(self):
+        self.store.save_discovery_page("aaai", 2026, [paper()], {})
+        config = {"years": [2026], "explicit_interests": ["reinforcement learning"],
+                  "topic_priority": {"primary_topics": ["reinforcement learning"]}, "metadata": {"max_requests_per_run": 0}}
+        args = argparse.Namespace(config=self.root / "config.json", output=self.root / "report.md", labels=None,
+                                  no_update_seen=True, discover_only=False, evaluate_only=False)
+        run = self.store.start_run("test")
+        failures = [{"venue_key": "aaai", "venue": "AAAI", "year": 2026, "error": "timeout"}]
+        with mock.patch.object(discovery, "discover", return_value=({}, failures)):
+            scout.run_pipeline_body(args, config, "test", [paper()], [], self.store, run, self.root / "seen.json", set(), ["aaai"], VENUES)
+        diagnostics = json.loads(args.output.with_suffix(".diagnostics.json").read_text(encoding="utf-8"))
+        self.assertEqual(diagnostics["selected_ids"], [])
+
     def test_full_cli_preview_keeps_production_cursor_and_delivered(self):
         self.store.save_discovery_page("aaai", 2026, [paper()], {"next_offset": 200})
         configuration = {"years": [2026], "venue_keys": ["aaai"], "state_db": str(self.store.path),

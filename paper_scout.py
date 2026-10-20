@@ -1245,6 +1245,10 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     available_years = years + ([probe] if probe else [])
     candidate_values = [paper for paper in store.candidates(requested, available_years)
                         if paper["id"] not in seen and not filter_one_zotero_existing(paper, zotero_identities)]
+    failed_partitions = [(failure["venue_key"], failure["year"]) for failure in failed_sources]
+    candidate_values = [paper for paper in candidate_values if not any(
+        paper["year"] == year and paper["id"].startswith(("conf/" if venue_by_key[key]["type"] == "conference" else "journals/") + key + "/")
+        for key, year in failed_partitions)]
     # Recheck eligibility against the current whitelist, including persisted candidates.
     candidate_values = [paper for paper in candidate_values if any(
         paper["id"].startswith(("conf/" if venue_by_key[key]["type"] == "conference" else "journals/") + key + "/")

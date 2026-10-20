@@ -79,7 +79,7 @@ def discover(store: Any, venues: dict[str, dict[str, Any]], years: list[int], co
         if (current - dt.datetime.fromisoformat(state["cycle_started_at"])).days >= int(config.get("full_cycle_target_days", 7)):
             stats["overdue"] += 1
         stats["attempted"] += 1
-        is_probe = year == probe_year and year not in years and not state.get("initialized")
+        is_probe = year == probe_year and year not in years and not (state.get("initialized") or state.get("has_records"))
         active_attempts += not is_probe
         offset = int(state.get("next_offset", 0))
         # Replay one boundary page without consuming the entire run on that same page.
@@ -100,6 +100,7 @@ def discover(store: Any, venues: dict[str, dict[str, Any]], years: list[int], co
                 # Save the old initialization flag with the page, so bootstrap records remain historical.
                 next_state = {**state, "signature": signature, "transport": transport, "total": total,
                               "next_offset": max(offset, start + raw), "status": "complete" if done else "partial",
+                              "has_records": state.get("has_records", False) or bool(raw),
                               "last_error": "", "next_check_at": ""}
                 stats["new_papers"] += store.save_discovery_page(key, year, page, next_state)
                 state = next_state
@@ -117,7 +118,7 @@ def discover(store: Any, venues: dict[str, dict[str, Any]], years: list[int], co
         except RuntimeError as exc:
             state["last_error"] = str(exc)
             store.save_discovery_page(key, year, [], state)
-            failures.append({"venue": venue.get("abbr", key), "year": year, "error": str(exc)})
+            failures.append({"venue": venue.get("abbr", key), "venue_key": key, "year": year, "error": str(exc)})
             active_failures += not is_probe
             if (getattr(exc, "global_failure", False) or config.get("failure_policy") == "strict" or
                     (active_failures >= 2 and active_failures == active_attempts)):
