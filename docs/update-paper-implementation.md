@@ -147,6 +147,7 @@ pending 或 SMTP accepted 问题仍使用原有恢复流程，不能通过清空
 - 真实 CPU embedding：固定 revision `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a` 加载并编码 2 条合成健康检查文本，排序与缓存断言通过；首次编码链路约 24.7 秒，包含该次模型加载/下载等开销。该数字不是 GitHub runner 的性能基准。
 - CI 新增 Python 3.11/3.12/3.13 基础测试、安装后离开源码目录的导入检查，以及独立 Python 3.12 Linux CPU 模型 smoke job。
 - GitHub 首轮 CI [39360842110](https://github.com/ademjest/ccf-paper-scout/actions/runs/39360842110) 的四个任务均通过（代码提交 `ff82414`）；后续边界修正会重新触发同样的检查。
+- 边界修正后的 CI [39361049738](https://github.com/ademjest/ccf-paper-scout/actions/runs/39361049738) 同样全部通过（`93261bf`）。校准审批额外要求 JSON 布尔值 `true`，不接受字符串 `"false"` 等隐式真值。
 
 尚未执行个人标注准确率评价、真实私人邮件投递、完整会议索引回填或 7～14 天灰度观察。这些需要实际用户数据与上线观察；不能由小规模 smoke test 代替。
 

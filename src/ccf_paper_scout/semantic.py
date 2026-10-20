@@ -159,10 +159,12 @@ def calibrated_thresholds(config: dict[str, Any], stats: dict[str, Any], *, prev
         if preview:
             return None
         raise ValueError("semantic production requires an approved calibration; run evaluate/preview first")
+    if not isinstance(calibration, dict):
+        raise ValueError("calibration must be a JSON object")
     if (calibration.get("model_signature") != stats["model_signature"] or
-            calibration.get("profile_hash") != stats["profile_hash"] or not calibration.get("approved")):
+            calibration.get("profile_hash") != stats["profile_hash"] or calibration.get("approved") is not True):
         raise ValueError("calibration does not match the current model and research profile")
     thresholds = calibration.get("thresholds", {})
-    if set(thresholds) != {"abstract", "title_only"} or any(not isinstance(v, (int, float)) or not -1 <= v <= 1 for v in thresholds.values()):
+    if set(thresholds) != {"abstract", "title_only"} or any(type(v) not in (int, float) or not -1 <= v <= 1 for v in thresholds.values()):
         raise ValueError("calibration must specify abstract and title_only cosine thresholds")
     return thresholds

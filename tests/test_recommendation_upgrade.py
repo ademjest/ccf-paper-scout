@@ -263,6 +263,9 @@ class SemanticTests(StoreFixture, unittest.TestCase):
         self.assertEqual(semantic.calibrated_thresholds(config, stats, preview=False)["abstract"], 0.5)
         with self.assertRaises(ValueError):
             semantic.calibrated_thresholds(config, {**stats, "profile_hash": "changed"}, preview=False)
+        calibration["approved"] = "false"
+        with self.assertRaises(ValueError):
+            semantic.calibrated_thresholds(config, stats, preview=False)
 
     def test_review_requires_exact_abstract_evidence(self):
         config = {"llm_translation": {"base_url": "https://example.org/v1", "model": "test"}}
