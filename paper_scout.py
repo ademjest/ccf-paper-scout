@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Low-resource Zotero -> DBLP -> CCF-A paper recommender (stdlib only)."""
+"""Zotero -> persistent DBLP candidates -> quality-gated CCF-A recommendations."""
 from __future__ import annotations
 
 import argparse
 import collections
 import datetime as dt
-import fcntl
+import copy
 import hashlib
 import html
 import http.client
@@ -16,6 +16,8 @@ import random
 import re
 import smtplib
 import ssl
+import shutil
+import sqlite3
 import state_store
 import sys
 import tempfile
@@ -28,6 +30,13 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
+from ccf_paper_scout import discovery, metadata, selection, semantic
 
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#-]{1,}|[\u4e00-\u9fff]{2,}")
 ANALYSIS_SCHEMA_VERSION = 1
@@ -76,7 +85,7 @@ class DblpUnavailableError(DblpError):
 
 
 class RunLock:
-    """Advisory single-instance lock for local/cron runs on Linux/WSL."""
+    """Advisory single-instance lock for local/cron runs."""
 
     def __init__(self, path: Path):
         self.path = path
@@ -86,8 +95,16 @@ class RunLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.handle = self.path.open("a+", encoding="utf-8")
         try:
-            fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+            if os.name == "nt":
+                self.handle.seek(0)
+                if not self.handle.read(1):
+                    self.handle.write(" ")
+                    self.handle.flush()
+                self.handle.seek(0)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
             self.handle.close()
             self.handle = None
             raise RuntimeError(f"another Paper Scout run is active (lock: {self.path})") from None
@@ -99,7 +116,11 @@ class RunLock:
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         if self.handle is not None:
-            fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+            if os.name == "nt":
+                self.handle.seek(0)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
             self.handle.close()
             self.handle = None
 
@@ -423,6 +444,9 @@ def fetch_dblp_page(
     timeout = int(request_config.get("timeout_seconds", 30))
     attempts = int(request_config.get("max_attempts", 3))
     interval = float(request_config.get("request_delay_seconds", 0.0))
+    if request_config.get("transport") == "sparql":
+        return fetch_dblp_sparql_page(venue, year, limit, start, user_agent, timeout=timeout,
+                                      attempts=attempts, minimum_interval_seconds=interval)
     query = f"venue:{venue['abbr'] or venue['dblp_key']}: year:{year}:"
     params = urllib.parse.urlencode({"q": query, "h": limit, "f": start, "format": "json"})
     endpoints = (
@@ -445,7 +469,7 @@ def fetch_dblp_page(
         if payload is None and blocked:
             _DBLP_SEARCH_API_BLOCKED = True
             print("source=DBLP search_api=blocked fallback=sparql", file=sys.stderr)
-    if payload is None and bool(request_config.get("sparql_fallback", True)):
+    if payload is None and request_config.get("transport") != "search" and bool(request_config.get("sparql_fallback", True)):
         try:
             return fetch_dblp_sparql_page(
                 venue, year, limit, start, user_agent,
@@ -458,7 +482,9 @@ def fetch_dblp_page(
             "all DBLP machine endpoints failed: " + " | ".join(errors),
             global_failure=blocked,
         )
-    hits_payload = payload.get("result", {}).get("hits", {})
+    hits_payload = payload.get("result", {}).get("hits")
+    if not isinstance(hits_payload, dict) or "@total" not in hits_payload:
+        raise DblpProtocolError("DBLP Search response is missing result.hits")
     try:
         total: int | None = int(hits_payload["@total"])
     except (KeyError, TypeError, ValueError):
@@ -536,7 +562,7 @@ OFFSET {max(0, int(start))}
         url, user_agent, timeout, attempts, minimum_interval_seconds,
         "application/sparql-results+json",
     )
-    bindings = payload.get("results", {}).get("bindings", [])
+    bindings = payload.get("results", {}).get("bindings")
     if not isinstance(bindings, list):
         raise DblpProtocolError("DBLP SPARQL response is missing results.bindings")
     prefix = f"{kind}/{key}/"
@@ -924,10 +950,11 @@ def rank_candidates(
         candidate_text = (paper["title"] + " ") * 3 + paper.get("abstract", "")
         terms = tokenize(candidate_text)
         counts = collections.Counter(terms)
+        candidate_norm = math.sqrt(sum((1 + math.log(tf)) ** 2 for tf in counts.values())) or 1.0
         contributions: dict[str, float] = {}
         score = 0.0
         for term, tf in counts.items():
-            value = profile.get(term, 0.0) * (1 + math.log(tf)) / norm
+            value = profile.get(term, 0.0) * (1 + math.log(tf)) / (norm * candidate_norm)
             if term in explicit_tokens:
                 value *= 2.5
             if value:
@@ -939,6 +966,7 @@ def rank_candidates(
             if phrase in title_lower and any(phrase in (x.get("title", "") + " " + x.get("abstract", "")).lower() for x in interests):
                 score += 0.12
         paper["score"] = score
+        paper["lexical_score"] = score
         paper["reasons"] = [k for k, _ in sorted(contributions.items(), key=lambda kv: kv[1], reverse=True)[:6]]
     return sorted(candidates, key=lambda x: (x["score"], x["year"], x["title"]), reverse=True)
 
@@ -946,9 +974,9 @@ def rank_candidates(
 def topic_matches(text: str, topic: str) -> bool:
     normalized = normalize_title(text)
     topic_lower = topic.lower()
-    has_rl = "reinforcement learning" in normalized
+    has_rl = "reinforcement learning" in normalized or bool(re.search(r"\b(?:marl|rl)\b", normalized))
     has_llm = "large language model" in normalized or bool(re.search(r"\bllms?\b", normalized))
-    has_multi_agent = "multi agent" in normalized
+    has_multi_agent = "multi agent" in normalized or bool(re.search(r"\bmarl\b", normalized))
     if topic_lower == "reinforcement learning":
         return has_rl
     if topic_lower == "multi-agent reinforcement learning":
@@ -987,12 +1015,9 @@ def select_topic_balanced(ranked: list[dict[str, Any]], limit: int, config: dict
     max_exploration = max(0, int(config.get("max_exploration_results", 1)))
     primary = [paper for paper in ranked if paper.get("topic_class") == "primary"]
     exploration = [paper for paper in ranked if paper.get("topic_class") == "exploration"]
-    other = [paper for paper in ranked if paper.get("topic_class") not in ("primary", "exploration")]
     selected = primary[:limit]
     if len(selected) < limit:
         selected.extend(exploration[:min(max_exploration, limit - len(selected))])
-    if len(selected) < limit:
-        selected.extend(other[:limit - len(selected)])
     order = {id(paper): index for index, paper in enumerate(ranked)}
     return sorted(selected[:limit], key=lambda paper: order[id(paper)])
 
@@ -1113,7 +1138,7 @@ def render_report(
         missing = "、".join(f"{source['venue']} {source['year']}" for source in failed_sources)
         lines += [f"数据源提示：{missing} 本次抓取失败，推荐结果不包含这些来源。", ""]
     if not papers:
-        lines += ["本次没有未推荐过且通过 CCF-A 硬过滤的候选论文。", ""]
+        lines += ["本次没有未投递且达到研究方向与信息完整度要求的论文；不会用弱相关论文补足数量。", ""]
     for i, p in enumerate(papers, 1):
         reasons = "、".join(p["reasons"]) if p["reasons"] else "弱匹配（可扩大兴趣集合或接入摘要补全）"
         authors = ", ".join(p["authors"][:8]) + (" et al." if len(p["authors"]) > 8 else "")
@@ -1131,7 +1156,9 @@ def render_report(
         if p.get("tags"):
             lines.append(f"- 主题标签：{'、'.join(p['tags'])}")
         lines += [
-            f"- 相关度：{p['score']:.4f}",
+            f"- 匹配方向：{'、'.join(p.get('topic_matches', [])) or p.get('semantic_direction', '待确认')}",
+            f"- 推荐类别：{'探索阅读' if p.get('topic_class') == 'exploration' else '主方向'}；{'新发现' if p.get('discovery_group') == 'new_discovery' else '历史补充'}",
+            f"- 元数据：{'包含摘要' if p.get('abstract') else '仅标题'}；首次发现：{p.get('first_seen_at', '未知')}",
             f"- Venue：{p['venue']}（CCF-{p['rank']}，{p['year']}，{p['type']}）",
             f"- 作者：{authors}",
             f"- 匹配依据：{reasons}",
@@ -1151,8 +1178,8 @@ def render_report(
 def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     user_agent = config.get("user_agent", "ccf-paper-scout/0.1")
     print(f"[1/7] Loading interest corpus from {'local JSON' if args.interests else 'Zotero Web API'}...")
-    interests = load_json(args.interests) if args.interests else fetch_zotero(config, user_agent)
-    if args.interests:
+    interests = [] if args.discover_only else load_json(args.interests) if args.interests else fetch_zotero(config, user_agent)
+    if args.discover_only or args.interests:
         zotero_identity_papers = interests
     else:
         dedup_cap = int(config.get("zotero_dedup_items", 0))
@@ -1185,7 +1212,10 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     if not state_path.is_absolute():
         state_path = args.config.resolve().parent / state_path
     store = state_store.StateStore(state_path)
-    store.migrate_legacy(seen_path, args.config.resolve().parent / "state/translations.json")
+    cache_path = Path(config.get("llm_translation", {}).get("cache", "state/translations.json"))
+    if not cache_path.is_absolute():
+        cache_path = args.config.resolve().parent / cache_path
+    store.migrate_legacy(seen_path, cache_path)
     seen.update(store.delivered_ids())
     run_id = store.start_run(hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest())
     try:
@@ -1200,43 +1230,65 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
 def run_pipeline_body(args, config, user_agent, interests, zotero_identity_papers, store, run_id, seen_path, seen, requested, venue_by_key):
     dblp_config = resolve_dblp_config(config)
     dblp_config.setdefault("request_delay_seconds", config.get("request_delay_seconds", 1.0))
-    print(f"[2/7] Fetching CCF-A candidates with pagination: {len(requested)} venues × {len(config.get('years', [dt.date.today().year]))} years...")
+    years = discovery.resolve_years(config)
+    print(f"[2/7] Discovering CCF-A candidates: {len(requested)} venues × years={years}")
     print(f"      Dedup history: {len(seen)} previously delivered paper IDs in {seen_path}")
     zotero_identities = build_zotero_identity_index(zotero_identity_papers)
-    candidates, source_stats, failed_sources = collect_dblp_sources(
-        requested, [int(year) for year in config.get("years", [dt.date.today().year])], venue_by_key,
-        dblp_config, user_agent, seen, zotero_identities,
-    )
-    total_raw = source_stats["raw_hits"]
-    skipped_seen = source_stats["delivered_skipped"]
-    zotero_skipped_count = source_stats["zotero_skipped"]
-    print(
-        f"[3/7] Deduplicated candidates: {total_raw} raw source hits, {skipped_seen} delivered, "
-        f"{zotero_skipped_count} already in Zotero, {len(candidates)} eligible"
-    )
-    candidate_values = list(candidates.values())
+    probe = max(years) + 1 if config.get("year_policy", {}).get("mode") == "rolling" and config.get("year_policy", {}).get("probe_next_year", True) else None
+    source_stats, failed_sources = ({"mode": "snapshot"}, []) if args.evaluate_only else discovery.discover(
+        store, {key: venue_by_key[key] for key in requested}, years, dblp_config, user_agent, fetch_dblp_page, probe_year=probe)
+    if args.discover_only:
+        store.finish_run(run_id, "discovery_complete")
+        atomic_write_text(args.output, json.dumps(source_stats, indent=2) + "\n")
+        print("discovery:", json.dumps(source_stats))
+        return 0
+    available_years = years + ([probe] if probe else [])
+    candidate_values = [paper for paper in store.candidates(requested, available_years)
+                        if paper["id"] not in seen and not filter_one_zotero_existing(paper, zotero_identities)]
+    # Recheck eligibility against the current whitelist, including persisted candidates.
+    candidate_values = [paper for paper in candidate_values if any(
+        paper["id"].startswith(("conf/" if venue_by_key[key]["type"] == "conference" else "journals/") + key + "/")
+        and paper.get("rank") == "A" for key in requested)]
+    candidates = {paper["id"]: paper for paper in candidate_values}
+    print(f"[3/7] Persistent eligible candidates: {len(candidates)}; discovery={json.dumps(source_stats)}")
     # A title-only first pass decides which candidates deserve metadata API calls.
     print("[4/7] Ranking by titles, Zotero corpus and explicit interests...")
     title_ranked = rank_candidates(interests, candidate_values, config.get("explicit_interests", []))
     topic_priority = dict(config.get("topic_priority", {}))
     title_ranked = apply_topic_priorities(title_ranked, topic_priority)
-    enrich_limit = int(config.get("openalex_enrich_limit", 20))
-    print(f"[5/7] Enriching top candidates from OpenAlex (successful abstract limit={enrich_limit})...")
-    attempted_abstracts, enriched_abstracts, missing_abstracts, failed_abstracts = enrich_candidates(
-        title_ranked, enrich_limit, user_agent
-    )
-    print(
-        f"      OpenAlex: {attempted_abstracts} DOI lookups, {enriched_abstracts} abstracts, "
-        f"{missing_abstracts} missing, {failed_abstracts} failed"
-    )
+    print("[5/7] Updating bounded metadata and semantic caches...")
+    metadata_stats = {} if args.evaluate_only else metadata.enrich(title_ranked, store, config.get("metadata", {}), user_agent, request_json, normalize_doi, openalex_abstract)
+    print("metadata:", json.dumps(metadata_stats))
     ranked = rank_candidates(interests, title_ranked, config.get("explicit_interests", []))
     ranked = apply_topic_priorities(ranked, topic_priority)
-    min_score = float(config.get("min_score", 0.01))
-    ranked = [paper for paper in ranked if paper["score"] >= min_score]
-    selected = select_topic_balanced(ranked, int(config.get("max_results", 20)), topic_priority)
-    print(f"[6/7] Selected {len(selected)} papers from {len(ranked)} above min_score={min_score}")
-    for index, paper in enumerate(selected, 1):
-        print(f"      {index:02d}. [{paper['venue']} {paper['year']}] score={paper['score']:.4f} {paper['title']}")
+    semantic_stats = {}
+    thresholds = None
+    semantic_production = config.get("semantic", {}).get("enabled", False) and config.get("semantic", {}).get("mode", "shadow") == "production"
+    if config.get("semantic", {}).get("enabled", False) and ranked:
+        semantic_stats = semantic.rank(ranked, interests, config, store)
+        print("semantic:", json.dumps(semantic_stats))
+        if semantic_production:
+            thresholds = semantic.calibrated_thresholds(config, semantic_stats, preview=args.no_update_seen)
+        if semantic_production and thresholds:
+            # A calibrated semantic direction may recover vocabulary missed by the phrase rules.
+            for paper in ranked:
+                if paper.get("semantic_score", -2) >= thresholds["abstract" if paper.get("abstract") else "title_only"]:
+                    paper["topic_class"] = "primary"
+                    paper["topic_matches"] = [paper.get("semantic_direction", "")]
+            ranked.sort(key=lambda p: p.get("semantic_score", -2), reverse=True)
+    if config.get("relevance_review", {}).get("enabled"):
+        selection.review(ranked, config, store, user_agent, post_json, parse_json_object)
+    selected = selection.select(ranked, int(config.get("max_results", 10)), config, thresholds,
+                                semantic_production=semantic_production)
+    for paper in selected:
+        paper["score"] = paper.get("semantic_score", paper["lexical_score"]) if semantic_production else paper["lexical_score"]
+    print(f"[6/7] Qualified selection: {len(selected)} of {len(ranked)}; no unrelated fill")
+    diagnostics = {"discovery": source_stats, "metadata": metadata_stats, "semantic": semantic_stats,
+                   "selected_ids": [paper["id"] for paper in selected],
+                   "papers": [{**{key: paper.get(key) for key in ("id", "title", "lexical_score", "semantic_score", "direction_scores", "selection_reason", "topic_class")}, "has_abstract": bool(paper.get("abstract"))} for paper in ranked]}
+    if args.labels:
+        diagnostics["evaluation"] = selection.metrics(selected, load_json(args.labels))
+    atomic_write_text(args.output.with_suffix(".diagnostics.json"), json.dumps(diagnostics, ensure_ascii=False, indent=2) + "\n")
     translation_config = dict(config.get("llm_translation", {}))
     translation_config.setdefault("user_interests", config.get("explicit_interests", []))
     print(f"[7/7] {llm_status(translation_config)}")
@@ -1275,7 +1327,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     if args.no_update_seen:
         store.finish_run(run_id, "preview")
     elif not selected:
-        store.finish_run(run_id, "no_candidates")
+        store.finish_run(run_id, "no_qualified_papers")
     elif delivery_enabled:
         store.finish_delivery(run_id, delivered, "accepted" if delivered else "SMTP failed")
     else:
@@ -1305,9 +1357,17 @@ def main() -> int:
     parser.add_argument("--venues", type=Path, default=Path(__file__).parent / "data/ccf_a_venues.json")
     parser.add_argument("--output", type=Path, default=Path("recommendations.md"))
     parser.add_argument("--no-update-seen", action="store_true")
+    parser.add_argument("--discover-only", action="store_true", help="persist discovery without ranking or sending")
+    parser.add_argument("--evaluate-only", action="store_true", help="evaluate the saved candidate snapshot in an isolated copy")
+    parser.add_argument("--labels", type=Path, help="private JSON object mapping paper IDs to true/false")
     parser.add_argument("--test-delivery", action="store_true", help="send one SMTP test message and exit without fetching or updating seen state")
     args = parser.parse_args()
-    config = load_json(args.config)
+    from ccf_paper_scout.cli import load_config
+    config = load_config(args.config)
+    if args.evaluate_only:
+        args.no_update_seen = True
+        config = copy.deepcopy(config)
+        config.setdefault("llm_translation", {})["enabled"] = False
     if args.test_delivery:
         smtp_config = config.get("delivery", {}).get("smtp", {})
         subject = str(smtp_config.get("subject", "CCF Paper Scout") + " — SMTP test")
@@ -1316,11 +1376,52 @@ def main() -> int:
             raise RuntimeError("SMTP test delivery was not accepted")
         print(f"SMTP test delivery accepted for {smtp_config.get('receiver', '(missing)')}")
         return 0
+    if args.no_update_seen:
+        with tempfile.TemporaryDirectory(prefix="paper-scout-preview-") as temporary:
+            config = isolated_config(config, args.config.resolve().parent, Path(temporary))
+            with RunLock(Path(config["run_lock"])):
+                return run_pipeline(args, config)
     lock_path = Path(config.get("run_lock", "state/paper_scout.lock"))
     if not lock_path.is_absolute():
         lock_path = args.config.resolve().parent / lock_path
     with RunLock(lock_path):
+        marker = Path(config.get("state_db", "state/paper_scout.sqlite3"))
+        if not marker.is_absolute():
+            marker = args.config.resolve().parent / marker
+        if (marker.parent / ".delivery-pending").exists():
+            raise RuntimeError("unresolved prior delivery; recover it before running")
         return run_pipeline(args, config)
+
+
+def isolated_config(config: dict[str, Any], base: Path, temporary: Path) -> dict[str, Any]:
+    """Snapshot private state with SQLite backup; preview never mutates production state."""
+    result = copy.deepcopy(config)
+    for key, default in (("state_db", "state/paper_scout.sqlite3"), ("seen_db", "state/seen.json")):
+        source = Path(config.get(key, default))
+        if not source.is_absolute():
+            source = base / source
+        target = temporary / source.name
+        if source.exists():
+            if key == "state_db":
+                connection = sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)
+                destination = sqlite3.connect(target)
+                try:
+                    connection.backup(destination)
+                finally:
+                    destination.close()
+                    connection.close()
+            else:
+                shutil.copy2(source, target)
+        result[key] = str(target)
+    cache = Path(config.get("llm_translation", {}).get("cache", "state/translations.json"))
+    if not cache.is_absolute():
+        cache = base / cache
+    if cache.exists():
+        shutil.copy2(cache, temporary / "translations.json")
+    result.setdefault("llm_translation", {})["cache"] = str(temporary / "translations.json")
+    result.setdefault("delivery", {}).setdefault("smtp", {})["enabled"] = False
+    result["run_lock"] = str(temporary / "preview.lock")
+    return result
 
 
 if __name__ == "__main__":

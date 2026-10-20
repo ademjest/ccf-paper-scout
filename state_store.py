@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -35,11 +36,34 @@ CREATE TABLE IF NOT EXISTS source_cursors(
   source TEXT NOT NULL, venue_key TEXT NOT NULL, year INTEGER NOT NULL, next_offset INTEGER NOT NULL,
   last_checked_at TEXT NOT NULL, PRIMARY KEY(source, venue_key, year)
 );
+CREATE TABLE IF NOT EXISTS candidate_papers(
+  paper_id TEXT PRIMARY KEY, venue_key TEXT NOT NULL, year INTEGER NOT NULL,
+  payload_json TEXT NOT NULL, text_hash TEXT NOT NULL, first_seen_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL, historical_import INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS candidate_partition ON candidate_papers(venue_key, year);
+CREATE TABLE IF NOT EXISTS metadata_fetch_state(
+  paper_id TEXT PRIMARY KEY, status TEXT NOT NULL, attempts INTEGER NOT NULL,
+  next_attempt_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS paper_embeddings(
+  cache_key TEXT NOT NULL, text_hash TEXT NOT NULL, model_signature TEXT NOT NULL,
+  dimensions INTEGER NOT NULL, vector BLOB NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY(cache_key, model_signature)
+);
+CREATE TABLE IF NOT EXISTS relevance_cache(
+  cache_key TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 """
 
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def text_hash(paper: dict[str, Any]) -> str:
+    text = str(paper.get("title", "")) + "\n" + str(paper.get("abstract", ""))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class StateStore:
@@ -50,6 +74,10 @@ class StateStore:
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.executescript(SCHEMA)
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(source_cursors)")}
+        if "state_json" not in columns:
+            self.connection.execute("ALTER TABLE source_cursors ADD COLUMN state_json TEXT NOT NULL DEFAULT '{}'")
+        self.connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (3, ?)", (now(),))
         self.connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (1, ?)", (now(),))
         self.connection.commit()
 
@@ -136,7 +164,7 @@ class StateStore:
 
     def save_cursor(self, source: str, venue_key: str, year: int, next_offset: int) -> None:
         self.connection.execute(
-            "INSERT INTO source_cursors VALUES (?,?,?,?,?) ON CONFLICT(source,venue_key,year) DO UPDATE SET next_offset=excluded.next_offset,last_checked_at=excluded.last_checked_at",
+            "INSERT INTO source_cursors(source,venue_key,year,next_offset,last_checked_at) VALUES (?,?,?,?,?) ON CONFLICT(source,venue_key,year) DO UPDATE SET next_offset=excluded.next_offset,last_checked_at=excluded.last_checked_at",
             (source, venue_key, year, next_offset, now()),
         )
         self.connection.commit()
@@ -147,6 +175,92 @@ class StateStore:
             (source, venue_key, year),
         ).fetchone()
         return int(row[0]) if row else 0
+
+    def scan_state(self, venue_key: str, year: int) -> dict[str, Any]:
+        row = self.connection.execute(
+            "SELECT next_offset,last_checked_at,state_json FROM source_cursors WHERE source='DBLP' AND venue_key=? AND year=?",
+            (venue_key, year),
+        ).fetchone()
+        if not row:
+            return {}
+        return {**json.loads(row[2]), "next_offset": row[0], "last_checked_at": row[1]}
+
+    def save_discovery_page(self, venue_key: str, year: int, papers: list[dict[str, Any]], state: dict[str, Any]) -> int:
+        """Commit page contents and cursor together; a failed transaction cannot skip a page."""
+        added = 0
+        with self.connection:
+            for paper in papers:
+                added += self._upsert_candidate(venue_key, year, paper, not state.get("initialized", False))
+            self.connection.execute(
+                "INSERT INTO source_cursors(source,venue_key,year,next_offset,last_checked_at,state_json) VALUES ('DBLP',?,?,?,?,?) "
+                "ON CONFLICT(source,venue_key,year) DO UPDATE SET next_offset=excluded.next_offset,last_checked_at=excluded.last_checked_at,state_json=excluded.state_json",
+                (venue_key, year, state.get("next_offset", 0), now(), json.dumps(state)),
+            )
+        return added
+
+    def _upsert_candidate(self, venue_key: str, year: int, paper: dict[str, Any], historical: bool) -> int:
+        row = self.connection.execute("SELECT payload_json FROM candidate_papers WHERE paper_id=?", (paper["id"],)).fetchone()
+        payload = json.loads(row[0]) if row else {}
+        # A source refresh without an abstract must not erase enriched metadata.
+        payload.update({key: value for key, value in paper.items() if value not in (None, "", [])})
+        self.connection.execute(
+            "INSERT INTO candidate_papers VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(paper_id) DO UPDATE SET "
+            "payload_json=excluded.payload_json,text_hash=excluded.text_hash,updated_at=excluded.updated_at",
+            (paper["id"], venue_key, year, json.dumps(payload, ensure_ascii=False), text_hash(payload), now(), now(), int(historical)),
+        )
+        return int(row is None)
+
+    def candidates(self, venue_keys: list[str], years: list[int]) -> list[dict[str, Any]]:
+        if not venue_keys or not years:
+            return []
+        rows = self.connection.execute(
+            f"SELECT payload_json,first_seen_at,historical_import FROM candidate_papers WHERE venue_key IN ({','.join('?' for _ in venue_keys)}) AND year IN ({','.join('?' for _ in years)})",
+            [*venue_keys, *years],
+        )
+        return [{**json.loads(row[0]), "first_seen_at": row[1], "historical_import": bool(row[2])} for row in rows]
+
+    def metadata_due(self, paper_id: str) -> bool:
+        row = self.connection.execute("SELECT next_attempt_at FROM metadata_fetch_state WHERE paper_id=?", (paper_id,)).fetchone()
+        return row is None or row[0] <= now()
+
+    def save_metadata(self, paper: dict[str, Any], status: str) -> None:
+        row = self.connection.execute("SELECT attempts FROM metadata_fetch_state WHERE paper_id=?", (paper["id"],)).fetchone()
+        attempts = (row[0] if row else 0) + 1
+        days = 30 if status == "success" else 7 if status in ("missing", "no_doi") else min(7, 2 ** min(attempts - 1, 3))
+        retry = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=days)).isoformat()
+        with self.connection:
+            self.connection.execute(
+                "UPDATE candidate_papers SET payload_json=?,text_hash=?,updated_at=? WHERE paper_id=?",
+                (json.dumps(paper, ensure_ascii=False), text_hash(paper), now(), paper["id"]),
+            )
+            self.connection.execute(
+                "INSERT INTO metadata_fetch_state VALUES (?,?,?,?,?) ON CONFLICT(paper_id) DO UPDATE SET "
+                "status=excluded.status,attempts=excluded.attempts,next_attempt_at=excluded.next_attempt_at,updated_at=excluded.updated_at",
+                (paper["id"], status, attempts, retry, now()),
+            )
+
+    def load_vector(self, key: str, fingerprint: str, signature: str) -> bytes | None:
+        row = self.connection.execute(
+            "SELECT vector FROM paper_embeddings WHERE cache_key=? AND text_hash=? AND model_signature=?",
+            (key, fingerprint, signature),
+        ).fetchone()
+        return bytes(row[0]) if row else None
+
+    def save_vector(self, key: str, fingerprint: str, signature: str, dimensions: int, vector: bytes) -> None:
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO paper_embeddings VALUES (?,?,?,?,?,?) ON CONFLICT(cache_key,model_signature) DO UPDATE SET "
+                "text_hash=excluded.text_hash,dimensions=excluded.dimensions,vector=excluded.vector,updated_at=excluded.updated_at",
+                (key, fingerprint, signature, dimensions, vector, now()),
+            )
+
+    def load_review(self, key: str) -> dict[str, Any] | None:
+        row = self.connection.execute("SELECT payload_json FROM relevance_cache WHERE cache_key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_review(self, key: str, payload: dict[str, Any]) -> None:
+        with self.connection:
+            self.connection.execute("INSERT OR REPLACE INTO relevance_cache VALUES (?,?,?)", (key, json.dumps(payload), now()))
 
     def migrate_legacy(self, seen_path: Path, translations_path: Path) -> None:
         marker = self.connection.execute("SELECT 1 FROM schema_migrations WHERE version=2").fetchone()

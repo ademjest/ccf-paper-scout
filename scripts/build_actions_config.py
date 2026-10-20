@@ -16,6 +16,12 @@ def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enab
     if missing:
         raise RuntimeError("missing Actions configuration: " + ", ".join(missing))
     payload = json.loads(base.read_text(encoding="utf-8"))
+    semantic_mode = os.environ.get("SEMANTIC_MODE", "off") or "off"
+    if semantic_mode not in ("off", "shadow", "production"):
+        raise ValueError("SEMANTIC_MODE must be off, shadow or production")
+    payload.setdefault("semantic", {})["enabled"] = semantic_mode != "off"
+    payload["semantic"]["mode"] = "production" if semantic_mode == "production" else "shadow"
+    payload.setdefault("selection", {})["calibration_file"] = str(state_dir / "calibration.json")
     payload["max_results"] = max_results
     payload["seen_db"] = str(state_dir / "seen.json")
     payload["state_db"] = str(state_dir / "paper_scout.sqlite3")

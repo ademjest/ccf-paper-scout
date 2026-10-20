@@ -14,18 +14,21 @@ CCF Paper Scout 是一个面向个人研究者的自动论文推荐程序。它�
 GitHub Actions
   → 恢复私有状态
   → 读取 Zotero 兴趣文献
-  → 分页检索 DBLP Search API，受阻时自动切换 DBLP SPARQL
+  → 按动态年份、全局预算和持久游标扫描 DBLP（默认官方 SPARQL）
+  → 保存完整候选库并周期复查；发现进度不依赖是否已推送
   → CCF-A 白名单与 DBLP record-key 校验
   → 排除已推送论文和 Zotero 已收藏论文
-  → 本地相关性排序与主题优先级
-  → OpenAlex 补充英文摘要
-  → 选择最多 10 篇论文
+  → 有预算、负缓存和正文哈希的 OpenAlex 摘要补全
+  → 归一化词项排序，可选 CPU embedding / 相关性复核
+  → 质量门槛与新发现/历史队列，最多 10 篇，不用其他方向补位
   → LLM 生成中文论文卡片（可选）
   → SMTP 投递
   → 持久化 SQLite 和去重状态
 ```
 
-LLM 不参与 CCF-A 资格判断、去重、核心排序和最终选文。它只处理最终入选论文的标题和摘要，用于生成中文标题、中文摘要、问题、方法、创新、证据、局限、推荐理由和主题标签。
+LLM 不参与 CCF-A 资格判断和去重。默认仅生成最终入选论文的中文卡片；独立开启 `relevance_review` 后，也可对少量候选做带原文证据的相关性复核。CPU embedding 默认关闭，可先使用 shadow 模式评估；正式接管选文需要匹配模型与画像的人工审查校准。
+
+`update-paper` 的实施内容、迁移方法、测试结果和 Actions 启用步骤见 [部署说明](docs/update-paper-implementation.md)。原始设计见 [优化方案](docs/recommendation-quality-and-discovery-plan.md)。
 
 ## 环境要求
 
@@ -74,16 +77,17 @@ ccf-paper-scout run \
 
 编辑复制得到的 `config.json`：
 
-- `years`：检索年份；
+- `year_policy`：默认按北京时间自动查询当前年与上一年，并低频探测下一年；固定年份使用 `year_policy.mode=fixed` 和 `years`；
 - `venue_keys`：允许检索的 DBLP venue key；
 - `dblp`：分页、全局限速、瞬时错误重试、SPARQL 降级和部分分区失败策略；
 - `max_results`：每次最多推荐数量，当前默认 10；
-- `min_score`：最低相关性分数；
+- `selection`：质量门槛、是否允许仅标题、探索上限和新发现队列；
+- `semantic`：可选 CPU embedding，固定模型 revision、增量预算与 shadow/production 模式；
 - `explicit_interests`：显式主要研究方向；
 - `topic_priority.primary_topics`：主要方向；
 - `topic_priority.exploration_topics`：拓展方向；
 - `topic_priority.max_exploration_results`：拓展方向最大篇数；
-- `openalex_enrich_limit`：OpenAlex 摘要补全上限；
+- `metadata.max_requests_per_run`：OpenAlex 每次运行的请求上限，默认 200，缺摘要与失败结果会缓存；
 - `recent_interest_items`：用于兴趣建模的近期 Zotero 文献数量；
 - `zotero_collection_keys`：限定参与兴趣建模的 Zotero collections；
 - `state_db`、`seen_db`：SQLite 和兼容去重状态路径。
@@ -94,7 +98,8 @@ ccf-paper-scout run \
 
 DBLP Search API 可能对云端出口返回 HTTP 200 的反机器人 HTML 页面。程序会先检查
 `Content-Type` 和正文特征，不会把验证页面当作 JSON 重试；两个 Search API 域名均不可用时，
-当前进程会熔断搜索接口并自动使用官方 SPARQL 服务。`dblp.request_delay_seconds` 应保持至少
+独立搜索接口调用会熔断并降级到官方 SPARQL 服务；持久发现默认直接使用 SPARQL，并固定
+单轮 transport，避免跨端点混用分页偏移。`dblp.request_delay_seconds` 应保持至少
 2–3 秒，使所有 DBLP 请求共享同一个进程级间隔。`dblp.max_attempts` 只作用于 429、5xx、
 超时和连接中断，不作用于反机器人页面或结构错误。
 
@@ -115,7 +120,7 @@ ccf-paper-scout run --config config.json --output recommendations.md
 
 仓库保留两个业务工作流：
 
-- `Paper Scout Manual`：`doctor`、`smtp-test`、`preview`、`production`；
+- `Paper Scout Manual`：`doctor`、`smtp-test`、`discover`、`evaluate`、`preview`、`production`；
 - `Paper Scout Daily`：每日自动推荐。
 
 另有 `Keep Scheduled Workflows Active`，用于降低公开仓库长时间无提交后 schedule 被暂停的概率。

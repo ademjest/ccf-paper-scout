@@ -127,6 +127,11 @@ class DblpResilienceTests(unittest.TestCase):
         self.assertIn("https://dblp.org/streams/conf/nips", query)
         self.assertIn('"2025"^^xsd:gYear', query)
 
+    def test_missing_sparql_results_are_not_an_empty_success(self):
+        with mock.patch.object(scout, "request_dblp_json", return_value={"unexpected": "payload"}):
+            with self.assertRaises(scout.DblpProtocolError):
+                scout.fetch_dblp_sparql_page(venue(), 2025, 10, 0, "test")
+
     def test_search_api_success_keeps_existing_mapping(self):
         payload = {
             "result": {

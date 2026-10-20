@@ -8,7 +8,12 @@ on:
         required: true
         type: choice
         default: doctor
-        options: [doctor, smtp-test, preview, production]
+        options: [doctor, smtp-test, discover, evaluate, preview, production]
+      semantic_mode:
+        description: Embedding mode (production requires private calibration.json)
+        type: choice
+        default: 'off'
+        options: ['off', shadow, production]
       max_results:
         description: Maximum recommendations for preview/production
         required: true
@@ -31,8 +36,16 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install .
+      - uses: ./.github/actions/setup-semantic
+        if: inputs.mode == 'preview' || inputs.mode == 'evaluate' || inputs.mode == 'production'
+        with:
+          mode: ${{ inputs.semantic_mode }}
+      - name: Record runtime version
+        run: |
+          git rev-parse HEAD
+          python -c 'import paper_scout; print(paper_scout.__file__)'
       - name: Restore private state
-        if: inputs.mode == 'preview' || inputs.mode == 'production'
+        if: inputs.mode == 'preview' || inputs.mode == 'production' || inputs.mode == 'discover' || inputs.mode == 'evaluate'
         env:
           STATE_REPO: ${{ vars.STATE_REPO }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
@@ -53,11 +66,12 @@ jobs:
           SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          SEMANTIC_MODE: ${{ inputs.semantic_mode }}
         run: |
           case "$REQUESTED_MAX_RESULTS" in (*[!0-9]*|'') echo "max_results must be an integer"; exit 2;; esac
           if [ "$REQUESTED_MAX_RESULTS" -lt 1 ] || [ "$REQUESTED_MAX_RESULTS" -gt 20 ]; then echo "max_results must be 1..20"; exit 2; fi
           EXTRA=""
-          if [ "$REQUESTED_MODE" = "preview" ]; then EXTRA="--disable-smtp"; fi
+          if [ "$REQUESTED_MODE" != "production" ]; then EXTRA="--disable-smtp"; fi
           python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results "$REQUESTED_MAX_RESULTS" $EXTRA
       - name: Doctor
         if: inputs.mode == 'doctor'
@@ -77,7 +91,21 @@ jobs:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
         run: ccf-paper-scout run --config config.action.json --output recommendations.md --no-update-seen
+      - name: Discover without delivery
+        if: inputs.mode == 'discover'
+        run: ccf-paper-scout discover --config config.action.json --output recommendations-discovery.json
+      - name: Evaluate saved candidate snapshot
+        if: inputs.mode == 'evaluate'
+        env:
+          ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
+          ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          EXTRA=()
+          if [ -f .runtime-state/state/evaluation-labels.json ]; then EXTRA=(--labels .runtime-state/state/evaluation-labels.json); fi
+          ccf-paper-scout evaluate --config config.action.json --output recommendations-evaluation.md "${EXTRA[@]}"
       - name: Check unresolved delivery transaction
         if: inputs.mode == 'production'
         run: |
@@ -92,6 +120,7 @@ jobs:
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
           PAPER_SCOUT_DELIVERY_GATE: .runtime-state/state/.delivery-approved
         run: |
@@ -108,7 +137,7 @@ jobs:
           fi
           wait "$scout_pid"
       - name: Persist production state
-        if: inputs.mode == 'production' && always()
+        if: (inputs.mode == 'production' || inputs.mode == 'discover') && always()
         env:
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         working-directory: .runtime-state
@@ -123,11 +152,23 @@ jobs:
             basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
             git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
           fi
-      - name: Upload preview report
-        if: inputs.mode == 'preview' && success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: paper-scout-${{ inputs.mode }}-${{ github.run_id }}
-          path: recommendations.md
-          if-no-files-found: ignore
-          retention-days: 7
+      - name: Save private preview and evaluation reports
+        if: (inputs.mode == 'preview' || inputs.mode == 'evaluate') && success()
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+        working-directory: .runtime-state
+        run: |
+          report_dir="reports/${GITHUB_RUN_ID}"
+          mkdir -p "$report_dir"
+          for report in ../recommendations*.md ../recommendations*.diagnostics.json; do
+            if [ -f "$report" ]; then cp "$report" "$report_dir/"; fi
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "$report_dir"
+          git commit -m "reports: private paper scout preview ${GITHUB_RUN_ID}"
+          basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
+      - name: Preview privacy notice
+        if: (inputs.mode == 'preview' || inputs.mode == 'evaluate') && success()
+        run: echo 'Preview/evaluation used an isolated state copy. Reports are in the private state repository under reports/<run-id>/; production state was not updated.' >> "$GITHUB_STEP_SUMMARY"

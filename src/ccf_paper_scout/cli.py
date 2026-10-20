@@ -12,13 +12,23 @@ from typing import Any
 
 def load_config(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload.get("years"), list) or not payload["years"]:
-        raise ValueError("years must be a non-empty list")
+    from .discovery import resolve_years
+    resolve_years(payload)
     if not isinstance(payload.get("venue_keys"), list):
         raise ValueError("venue_keys must be a list")
     max_results = int(payload.get("max_results", 20))
     if not 1 <= max_results <= 20:
         raise ValueError("max_results must be 1..20")
+    mode = payload.get("semantic", {}).get("mode", "shadow")
+    if mode not in ("shadow", "production"):
+        raise ValueError("semantic.mode must be shadow or production")
+    calibration_file = payload.get("selection", {}).get("calibration_file")
+    if calibration_file:
+        calibration_path = Path(calibration_file)
+        if not calibration_path.is_absolute():
+            calibration_path = path.resolve().parent / calibration_path
+        if calibration_path.exists():
+            payload["selection"]["calibration"] = json.loads(calibration_path.read_text(encoding="utf-8"))
     return payload
 
 
@@ -73,7 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser = sub.add_parser("doctor")
     doctor_parser.add_argument("--config", type=Path, default=Path("config.json"))
     doctor_parser.add_argument("--no-network", action="store_true")
-    run_parser = sub.add_parser("run", add_help=False)
+    sub.add_parser("run", add_help=False)
+    sub.add_parser("discover", add_help=False)
+    sub.add_parser("evaluate", add_help=False)
     delivery_parser = sub.add_parser("test-delivery")
     delivery_parser.add_argument("--config", type=Path, default=Path("config.json"))
     return parser
@@ -82,13 +94,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args(argv)
-    if args.command == "run":
+    if args.command in ("run", "discover", "evaluate"):
         args.args = list(unknown)
     elif unknown:
         parser.error("unrecognized arguments: " + " ".join(unknown))
     if args.command == "doctor":
         return doctor(args.config, not args.no_network)
-    if args.command in ("run", "test-delivery"):
+    if args.command in ("run", "discover", "evaluate", "test-delivery"):
         import paper_scout
         if not hasattr(args, "venues"):
             args.venues = Path(str(files("ccf_paper_scout").joinpath("data/ccf_a_venues.json")))
@@ -104,6 +116,10 @@ def main(argv: list[str] | None = None) -> int:
         old = sys.argv
         try:
             run_args = list(args.args)
+            if args.command == "discover":
+                run_args.append("--discover-only")
+            elif args.command == "evaluate":
+                run_args.append("--evaluate-only")
             if "--venues" not in run_args:
                 run_args.extend(["--venues", str(files("ccf_paper_scout").joinpath("data/ccf_a_venues.json"))])
             sys.argv = ["paper_scout.py", *run_args]

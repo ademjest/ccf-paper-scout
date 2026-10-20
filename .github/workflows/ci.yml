@@ -22,3 +22,18 @@ jobs:
       - run: python -m pip install .
       - run: python -m compileall -q paper_scout.py state_store.py src scripts
       - run: python -m unittest discover -s tests -v
+      - name: Verify installed package outside checkout
+        working-directory: ${{ runner.temp }}
+        run: python -c 'import paper_scout; from ccf_paper_scout import discovery, metadata, selection, semantic'
+  semantic-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: ./.github/actions/setup-semantic
+        with:
+          mode: shadow
+      - run: python scripts/semantic_smoke.py

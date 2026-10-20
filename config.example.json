@@ -1,11 +1,18 @@
 {
-  "years": [2026, 2025],
+  "year_policy": {
+    "mode": "rolling",
+    "timezone": "Asia/Shanghai",
+    "lookback_years": 1,
+    "probe_next_year": true
+  },
   "venue_keys": ["nips", "icml", "cvpr", "iccv", "aaai", "acl", "sigir", "kdd"],
   "dblp": {
     "page_size": 100,
-    "max_pages_per_venue": 5,
-    "target_unseen_per_venue": 30,
-    "stop_after_seen_pages": 2,
+    "transport": "sparql",
+    "max_pages_per_partition_per_run": 12,
+    "max_pages_per_run": 80,
+    "overlap_pages": 1,
+    "full_cycle_target_days": 7,
     "failure_policy": "continue",
     "minimum_success_ratio": 0.75,
     "request_delay_seconds": 3.0,
@@ -14,7 +21,38 @@
     "sparql_fallback": true
   },
   "max_results": 10,
-  "min_score": 0.01,
+  "selection": {
+    "min_lexical_score": 0.05,
+    "allow_title_only": false,
+    "max_exploration_results": 1,
+    "new_discovery_days": 14,
+    "new_discovery_slots": 7
+  },
+  "metadata": {
+    "max_requests_per_run": 200,
+    "exploration_fraction": 0.2
+  },
+  "semantic": {
+    "enabled": false,
+    "mode": "shadow",
+    "model": "BAAI/bge-small-en-v1.5",
+    "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+    "device": "cpu",
+    "batch_size": 16,
+    "max_chunks_per_paper": 3,
+    "max_updated_papers_per_run": 500
+  },
+  "research_profile": {
+    "directions": [
+      {"name": "reinforcement learning", "description": "Reinforcement learning methods for sequential decision making, policy and value learning, exploration, reward design, and planning."},
+      {"name": "multi-agent reinforcement learning", "description": "Multi-agent reinforcement learning with interacting decision makers, coordination, cooperation, credit assignment, or game-theoretic policy learning."},
+      {"name": "LLM-assisted reinforcement learning", "description": "Using large language models to assist reinforcement learning through reward design, planning, exploration or policy learning; distinguish from merely using reinforcement learning to fine-tune language models."}
+    ]
+  },
+  "relevance_review": {
+    "enabled": false,
+    "max_candidates_per_run": 30
+  },
   "explicit_interests": [
     "reinforcement learning",
     "multi-agent reinforcement learning",
@@ -31,7 +69,6 @@
     "exploration_topic_boost": 0.2,
     "max_exploration_results": 1
   },
-  "openalex_enrich_limit": 60,
   "recent_interest_items": 200,
   "zotero_dedup_items": 0,
   "zotero_collection_keys": [],
