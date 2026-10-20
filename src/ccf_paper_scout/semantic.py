@@ -149,7 +149,11 @@ def rank(papers: list[dict[str, Any]], interests: list[dict[str, Any]], config: 
         paper["direction_scores"] = scores
         paper["semantic_score"] = max(scores.values())
         paper["semantic_direction"] = max(scores, key=scores.get)
-    return {"cache_hits": hits, "encoded": len(encoded), "deferred": len(pending) - len(to_encode),
+    relation_stats = {}
+    if config.get("relation_policy", {}).get("enabled"):
+        from .relations import score
+        relation_stats = score(papers, vectors, encoder, store)
+    return {"relations": relation_stats, "cache_hits": hits, "encoded": len(encoded), "deferred": len(pending) - len(to_encode),
             "profile_hash": profile_hash, "model_signature": encoder.signature}
 
 

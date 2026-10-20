@@ -36,10 +36,10 @@ if os.name == "nt":
 else:
     import fcntl
 
-from ccf_paper_scout import discovery, metadata, selection, semantic
+from ccf_paper_scout import discovery, metadata, proceedings, relations, selection, semantic
 
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#-]{1,}|[\u4e00-\u9fff]{2,}")
-ANALYSIS_SCHEMA_VERSION = 1
+ANALYSIS_SCHEMA_VERSION = 2
 ANALYSIS_STRING_FIELDS = (
     "title_zh", "abstract_zh", "focus", "problem", "method", "novelty",
     "evidence", "limitations", "why_relevant",
@@ -536,7 +536,7 @@ def fetch_dblp_sparql_page(
     query = f"""
 PREFIX dblp: <https://dblp.org/rdf/schema#>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-SELECT ?publication ?title ?year ?doi ?document
+SELECT ?publication ?title ?year ?doi ?document ?proceedings
        (GROUP_CONCAT(DISTINCT ?authorName; separator="|||") AS ?authors)
 WHERE {{
   ?publication a dblp:{record_type} ;
@@ -546,12 +546,13 @@ WHERE {{
   FILTER(?year = "{int(year)}"^^xsd:gYear)
   OPTIONAL {{ ?publication dblp:doi ?doi }}
   OPTIONAL {{ ?publication dblp:primaryDocumentPage ?document }}
+  OPTIONAL {{ ?publication dblp:publishedAsPartOf ?proceedings }}
   OPTIONAL {{
     ?publication dblp:authoredBy ?author .
     ?author dblp:primaryCreatorName ?authorName
   }}
 }}
-GROUP BY ?publication ?title ?year ?doi ?document
+GROUP BY ?publication ?title ?year ?doi ?document ?proceedings
 ORDER BY ?publication
 LIMIT {max(1, int(limit))}
 OFFSET {max(0, int(start))}
@@ -593,10 +594,28 @@ OFFSET {max(0, int(start))}
             "url": f"https://dblp.org/rec/{record_key}",
             "ee": document,
             "doi": doi,
+            "proceedings_id": str(binding.get("proceedings", {}).get("value", "")),
         })
     raw_count = len(bindings)
     total = start + raw_count if raw_count < limit else None
     return result, total, raw_count
+
+
+def lookup_dblp_proceedings(ids: list[str], user_agent: str, settings: dict[str, Any]) -> dict[str, dict[str, str]]:
+    if any(not re.fullmatch(r"conf/[A-Za-z0-9_/-]+", value) for value in ids):
+        raise ValueError("unsafe DBLP publication ID")
+    values = " ".join(f"<https://dblp.org/rec/{value}>" for value in ids)
+    query = ("PREFIX d: <https://dblp.org/rdf/schema#> SELECT ?paper ?proceedings WHERE { VALUES ?paper { " +
+             values + " } OPTIONAL { ?paper d:publishedAsPartOf ?proceedings } }")
+    url = DBLP_SPARQL_ENDPOINT + "?" + urllib.parse.urlencode({"query": query, "format": "json"})
+    payload = request_dblp_json(url, user_agent, int(settings.get("timeout_seconds", 30)),
+                                int(settings.get("max_attempts", 3)), float(settings.get("request_delay_seconds", 3)),
+                                "application/sparql-results+json")
+    bindings = payload.get("results", {}).get("bindings")
+    if not isinstance(bindings, list):
+        raise DblpProtocolError("proceedings lookup missing bindings")
+    return {row["paper"]["value"].removeprefix("https://dblp.org/rec/"): {"proceedings_id": row["proceedings"]["value"]}
+            for row in bindings if row.get("proceedings")}
 
 
 def resolve_dblp_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -799,6 +818,7 @@ def analysis_fingerprint(paper: dict[str, Any], config: dict[str, Any]) -> str:
         "model": config.get("model", ""),
         "language": config.get("language", "简体中文"),
         "interests": config.get("user_interests", []),
+        "admission": {key: paper.get(key) for key in ("main_conference_status", "track", "topic_matches", "relation_review")},
     }
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -859,11 +879,11 @@ def translate_papers(
         fingerprint = analysis_fingerprint(paper, config)
         sqlite_cached = store.load_translation(cache_key, fingerprint) if store and cache_key else None
         if sqlite_cached:
-            paper.update({key: value for key, value in sqlite_cached.items() if not key.startswith("_")})
+            paper.update({key: value for key, value in sqlite_cached.items() if key in (*ANALYSIS_STRING_FIELDS, "tags")})
             cache_hits += 1
             continue
         if cache_key in cache and cache[cache_key].get("_fingerprint") == fingerprint:
-            paper.update({key: value for key, value in cache[cache_key].items() if not key.startswith("_")})
+            paper.update({key: value for key, value in cache[cache_key].items() if key in (*ANALYSIS_STRING_FIELDS, "tags")})
             cache_hits += 1
             continue
         abstract = paper.get("abstract", "")
@@ -873,6 +893,8 @@ def translate_papers(
             "If evidence is unavailable, say '摘要未披露'. Return JSON only with fields: "
             "title_zh, abstract_zh, focus, problem, method, novelty, evidence, limitations, why_relevant, tags. "
             "All fields except tags must be strings; tags must be an array of 2-5 short strings.\n\n"
+            "Do not reclassify publication eligibility or LLM/RL roles. Do not claim relevance to all interests. "
+            f"Admission and role evidence (immutable): {json.dumps({key: paper.get(key) for key in ('main_conference_status', 'track', 'topic_matches', 'relation_review')}, ensure_ascii=False)}\n"
             f"User interests: {', '.join(config.get('user_interests', [])) or '(not provided)'}\n"
             f"Title: {paper.get('title', '')}\nAbstract: {abstract or '(abstract unavailable)'}"
         )
@@ -1131,9 +1153,12 @@ def send_email(subject: str, report: str, config: dict[str, Any]) -> bool:
 def render_report(
     papers: list[dict[str, Any]], interest_count: int, candidate_count: int,
     failed_sources: list[dict[str, Any]] | None = None,
+    quality_summary: dict[str, Any] | None = None,
 ) -> str:
     now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     lines = ["# CCF-A 兴趣论文推荐", "", f"生成时间：{now}", f"兴趣库：{interest_count} 篇；CCF-A 候选：{candidate_count} 篇；本次输出：{len(papers)} 篇。", ""]
+    if quality_summary:
+        lines += [f"准入统计：{json.dumps(quality_summary, ensure_ascii=False)}", ""]
     if failed_sources:
         missing = "、".join(f"{source['venue']} {source['year']}" for source in failed_sources)
         lines += [f"数据源提示：{missing} 本次抓取失败，推荐结果不包含这些来源。", ""]
@@ -1157,6 +1182,9 @@ def render_report(
             lines.append(f"- 主题标签：{'、'.join(p['tags'])}")
         lines += [
             f"- 匹配方向：{'、'.join(p.get('topic_matches', [])) or p.get('semantic_direction', '待确认')}",
+            f"- 主会核验：{p.get('main_conference_status', 'unresolved')}；轨道：{p.get('track', '未知')}；论文集：{p.get('proceedings_id', '未知')}",
+            f"- 核验证据：{p.get('verification_source', '暂无')}",
+            f"- LLM／RL 关系：{'、'.join(p.get('relation_review', {}).get('labels', [])) or p.get('relation_review', {}).get('status', '未启用')}；策略判断：{p.get('relation_decision', '未启用')}",
             f"- 推荐类别：{'探索阅读' if p.get('topic_class') == 'exploration' else '主方向'}；{'新发现' if p.get('discovery_group') == 'new_discovery' else '历史补充'}",
             f"- 元数据：{'包含摘要' if p.get('abstract') else '仅标题'}；首次发现：{p.get('first_seen_at', '未知')}",
             f"- Venue：{p['venue']}（CCF-{p['rank']}，{p['year']}，{p['type']}）",
@@ -1166,12 +1194,15 @@ def render_report(
         ]
         if p.get("ee"):
             lines.append(f"- 出版/全文入口：{p['ee']}")
+        for role, answer in p.get("relation_review", {}).items():
+            if isinstance(answer, dict) and answer.get("quote"):
+                lines.append(f"- 关系证据（{role}）：{answer['quote']}")
         if p.get("abstract_zh"):
             lines.append(f"- 中文摘要：{p['abstract_zh']}")
         if p.get("abstract"):
             lines.append(f"- 原文摘要：{p['abstract']}")
         lines.append("")
-    lines += ["---", "质量说明：所有结果均受本地 CCF-A venue 白名单约束，并通过 DBLP record-key 前缀复核以降低文本误命中；这不是官方认证或对单篇论文质量的结论，请以最新 CCF 官方目录和正式 proceedings 为准。", ""]
+    lines += ["---", "质量说明：主会准入依据版本化论文集清单及轨道证据，未知轨道暂缓。关系相似度不是概率；影子模式的策略判断不等于实际拦截。资格与相关性均不代表官方认证或论文质量结论。", ""]
     return "\n".join(lines)
 
 
@@ -1253,6 +1284,14 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     candidate_values = [paper for paper in candidate_values if any(
         paper["id"].startswith(("conf/" if venue_by_key[key]["type"] == "conference" else "journals/") + key + "/")
         and paper.get("rank") == "A" for key in requested)]
+    all_candidates = candidate_values
+    qualification_stats = {}
+    if config.get("main_conference", {}).get("enabled", True):
+        if not args.evaluate_only:
+            qualification_stats["backfill"] = proceedings.backfill(
+                candidate_values, store, config.get("main_conference", {}),
+                lambda ids: lookup_dblp_proceedings(ids, user_agent, dblp_config))
+        candidate_values, qualification_stats["statuses"] = proceedings.gate(candidate_values, store)
     candidates = {paper["id"]: paper for paper in candidate_values}
     print(f"[3/7] Persistent eligible candidates: {len(candidates)}; discovery={json.dumps(source_stats)}")
     # A title-only first pass decides which candidates deserve metadata API calls.
@@ -1265,11 +1304,16 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     print("metadata:", json.dumps(metadata_stats))
     ranked = rank_candidates(interests, title_ranked, config.get("explicit_interests", []))
     ranked = apply_topic_priorities(ranked, topic_priority)
+    # Recheck after abstract enrichment in case the abstract identifies non-research content.
+    if config.get("main_conference", {}).get("enabled", True):
+        ranked, qualification_stats["after_metadata"] = proceedings.gate(ranked, store)
     semantic_stats = {}
     thresholds = None
     semantic_production = config.get("semantic", {}).get("enabled", False) and config.get("semantic", {}).get("mode", "shadow") == "production"
     if config.get("semantic", {}).get("enabled", False) and ranked:
+        semantic_started = time.monotonic()
         semantic_stats = semantic.rank(ranked, interests, config, store)
+        semantic_stats["seconds"] = round(time.monotonic() - semantic_started, 3)
         print("semantic:", json.dumps(semantic_stats))
         if semantic_production:
             thresholds = semantic.calibrated_thresholds(config, semantic_stats, preview=args.no_update_seen)
@@ -1280,6 +1324,21 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
                     paper["topic_class"] = "primary"
                     paper["topic_matches"] = [paper.get("semantic_direction", "")]
             ranked.sort(key=lambda p: p.get("semantic_score", -2), reverse=True)
+    relation_stats = {}
+    if config.get("relation_policy", {}).get("enabled"):
+        if not config.get("semantic", {}).get("enabled"):
+            for paper in ranked:
+                for field in ("relation_scores", "relation_margin", "relation_signature"):
+                    paper.pop(field, None)
+        relation_stats = relations.assess(ranked, config, store, user_agent, post_json, parse_json_object,
+                                          allow_network=not args.evaluate_only)
+        for paper in ranked:
+            labels = paper["relation_review"]["labels"]
+            # Co-occurrence is not evidence of LLM -> RL, even in shadow reports.
+            paper["topic_matches"] = [topic for topic in paper.get("topic_matches", []) if topic != "LLM-assisted reinforcement learning"]
+            if "llm_for_rl" in labels:
+                paper["topic_matches"].append("LLM-assisted reinforcement learning")
+        store.update_candidates(ranked)
     if config.get("relevance_review", {}).get("enabled"):
         selection.review(ranked, config, store, user_agent, post_json, parse_json_object)
     selected = selection.select(ranked, int(config.get("max_results", 10)), config, thresholds,
@@ -1287,9 +1346,14 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     for paper in selected:
         paper["score"] = paper.get("semantic_score", paper["lexical_score"]) if semantic_production else paper["lexical_score"]
     print(f"[6/7] Qualified selection: {len(selected)} of {len(ranked)}; no unrelated fill")
-    diagnostics = {"discovery": source_stats, "metadata": metadata_stats, "semantic": semantic_stats,
+    shadow_selected = selection.select(copy.deepcopy(ranked), int(config.get("max_results", 10)),
+                                       {**config, "relation_policy": {**config.get("relation_policy", {}), "mode": "production"}},
+                                       thresholds, semantic_production=semantic_production)
+    diagnostics = {"discovery": source_stats, "qualification": qualification_stats, "metadata": metadata_stats, "semantic": semantic_stats,
+                   "relations": relation_stats, "relation_policy_selected_ids": [p["id"] for p in shadow_selected],
+                   "qualification_deferred": [{key: p.get(key) for key in ("id", "title", *proceedings.FIELDS, "selection_reason")} for p in all_candidates if p.get("main_conference_status") != "verified"],
                    "selected_ids": [paper["id"] for paper in selected],
-                   "papers": [{**{key: paper.get(key) for key in ("id", "title", "lexical_score", "semantic_score", "direction_scores", "selection_reason", "topic_class")}, "has_abstract": bool(paper.get("abstract"))} for paper in ranked]}
+                   "papers": [{**{key: paper.get(key) for key in ("id", "title", "lexical_score", "semantic_score", "direction_scores", "selection_reason", "topic_class", *proceedings.FIELDS, "relation_scores", "relation_margin", "relation_signature", "relation_review", "relation_decision")}, "has_abstract": bool(paper.get("abstract"))} for paper in ranked]}
     if args.labels:
         diagnostics["evaluation"] = selection.metrics(selected, load_json(args.labels))
     atomic_write_text(args.output.with_suffix(".diagnostics.json"), json.dumps(diagnostics, ensure_ascii=False, indent=2) + "\n")
@@ -1300,10 +1364,17 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     if not translation_cache.is_absolute():
         translation_cache = args.config.resolve().parent / translation_cache
     translated_count, translation_cache_hits = translate_papers(selected, translation_config, user_agent, translation_cache, store)
+    for paper in selected:
+        if config.get("relation_policy", {}).get("enabled"):
+            role = paper.get("relation_review", {})
+            labels = role.get("labels", [])
+            paper["why_relevant"] = ("匹配方向：" + "、".join(paper.get("topic_matches", [])) +
+                                     ("；关系标签：" + "、".join(labels) if labels else "；未确认 LLM／RL 作用关系，不宣称与全部方向相关。"))
     if translation_config.get("enabled", False):
         print(f"      LLM translation: {translated_count} API successes, {translation_cache_hits} cache hits")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    report = render_report(selected, len(interests), len(candidates), failed_sources)
+    report = render_report(selected, len(interests), len(candidates), failed_sources,
+                           {"主会资格": qualification_stats, "关系策略": relation_stats})
     atomic_write_text(args.output, report)
     store.record_selection(run_id, selected)
     delivery_config = config.get("delivery", {}).get("smtp", {})

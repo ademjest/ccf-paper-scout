@@ -18,7 +18,8 @@ def paper(index=0, **overrides):
     return {"id": f"conf/aaai/Test{index}", "title": "Multi-agent reinforcement learning", "abstract": "Policies learn cooperative reinforcement learning with rewards.",
             "authors": ["Test Author"], "year": 2026, "venue": "AAAI", "venue_name": "AAAI", "rank": "A", "type": "conference",
             "url": f"https://dblp.org/rec/conf/aaai/Test{index}", "doi": "10.1234/test", "ee": "", "lexical_score": 0.3,
-            "score": 0.3, "reasons": ["reinforcement"], "topic_class": "primary", **overrides}
+            "score": 0.3, "reasons": ["reinforcement"], "topic_class": "primary",
+            "proceedings_id": "https://dblp.org/rec/conf/aaai/2026", "main_conference_status": "verified", **overrides}
 
 
 VENUES = {"aaai": {"dblp_key": "aaai", "abbr": "AAAI", "rank": "A", "type": "conference", "name": "AAAI"}}

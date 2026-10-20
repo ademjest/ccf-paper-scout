@@ -16,17 +16,20 @@ GitHub Actions
   → 读取 Zotero 兴趣文献
   → 按动态年份、全局预算和持久游标扫描 DBLP（默认官方 SPARQL）
   → 保存完整候选库并周期复查；发现进度不依赖是否已推送
-  → CCF-A 白名单与 DBLP record-key 校验
+  → CCF-A 白名单与具体 proceedings／官方轨道证据硬过滤（未知暂缓）
   → 排除已推送论文和 Zotero 已收藏论文
   → 有预算、负缓存和正文哈希的 OpenAlex 摘要补全
   → 归一化词项排序，可选 CPU embedding / 相关性复核
+  → LLM／RL 作用方向原型与独立证据复核（默认 shadow，正式模式强制准入）
   → 质量门槛与新发现/历史队列，最多 10 篇，不用其他方向补位
   → LLM 生成中文论文卡片（可选）
   → SMTP 投递
   → 持久化 SQLite 和去重状态
 ```
 
-LLM 不参与 CCF-A 资格判断和去重。默认仅生成最终入选论文的中文卡片；独立开启 `relevance_review` 后，也可对少量候选做带原文证据的相关性复核。CPU embedding 默认关闭，可先使用 shadow 模式评估；正式接管选文需要匹配模型与画像的人工审查校准。
+LLM 不参与 CCF-A 出版资格判断和去重。关系复核与最终中文卡片分开，每轮最多审核 20 篇边界候选，要求摘要原句证据。CPU embedding 默认关闭，可先使用 shadow 模式评估；正式接管兴趣排序需要匹配模型与画像的人工审查校准，关系原型另有独立的校准版本。
+
+主会与 LLM／RL 关系升级的范围、保守暂缓边界及 Actions 测试步骤见 [实施与审查说明](docs/main-conference-and-relations-implementation.md)。
 
 `update-paper` 的实施内容、迁移方法、测试结果和 Actions 启用步骤见 [部署说明](docs/update-paper-implementation.md)。原始设计见 [优化方案](docs/recommendation-quality-and-discovery-plan.md)。
 
@@ -83,6 +86,8 @@ ccf-paper-scout run \
 - `max_results`：每次最多推荐数量，当前默认 10；
 - `selection`：质量门槛、是否允许仅标题、探索上限和新发现队列；
 - `semantic`：可选 CPU embedding，固定模型 revision、增量预算与 shadow/production 模式；
+- `main_conference`：主会资格硬过滤、历史候选论文集回填预算；
+- `relation_policy`：LLM→RL、RL→LLM、LLM 多智能体 RL 独立分类与证据复核，默认 shadow；
 - `explicit_interests`：显式主要研究方向；
 - `topic_priority.primary_topics`：主要方向；
 - `topic_priority.exploration_topics`：拓展方向；
@@ -213,7 +218,7 @@ GitHub-hosted schedule 是 best-effort，提前调度只是根据历史延迟进
 - Zotero 文献在运行环境中用于本地兴趣建模；
 - DBLP 接收 venue、年份和查询参数；
 - OpenAlex 接收候选 DOI；
-- LLM 只接收最终入选论文的标题、摘要和显式兴趣方向；
+- 翻译 LLM 接收最终入选论文的标题、摘要和显式兴趣方向；独立关系复核还会接收每轮有预算上限的边界候选标题及摘要；
 - 完整 Zotero 文库、推荐历史、SQLite、SMTP 授权码和各类 API Key 不应进入公开仓库；
 - 报告、调试导出、测试、设计文档和个人分析文件由 `.gitignore` 保持在本地。
 

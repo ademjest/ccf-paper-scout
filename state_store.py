@@ -219,6 +219,14 @@ class StateStore:
         )
         return [{**json.loads(row[0]), "first_seen_at": row[1], "historical_import": bool(row[2])} for row in rows]
 
+    def update_candidates(self, papers: list[dict[str, Any]]) -> None:
+        """Persist qualification/evidence without changing delivery or metadata retry state."""
+        with self.connection:
+            self.connection.executemany(
+                "UPDATE candidate_papers SET payload_json=?,text_hash=?,updated_at=? WHERE paper_id=?",
+                [(json.dumps(paper, ensure_ascii=False), text_hash(paper), now(), paper["id"]) for paper in papers],
+            )
+
     def metadata_due(self, paper_id: str) -> bool:
         row = self.connection.execute("SELECT next_attempt_at FROM metadata_fetch_state WHERE paper_id=?", (paper_id,)).fetchone()
         return row is None or row[0] <= now()

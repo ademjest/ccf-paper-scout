@@ -24,7 +24,7 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - name: Verify installed package outside checkout
         working-directory: ${{ runner.temp }}
-        run: python -c 'import paper_scout; from ccf_paper_scout import discovery, metadata, selection, semantic'
+        run: python -c 'import paper_scout; from ccf_paper_scout import discovery, metadata, selection, semantic, proceedings, relations; assert proceedings.registry()["volumes"]'
   semantic-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25

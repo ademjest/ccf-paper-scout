@@ -1,0 +1,935 @@
+{
+  "version": "main-proceedings-2026-10-20-v1",
+  "evidence_method": "DBLP SPARQL publishedAsPartOf joined to proceedings title and primaryDocumentPage. Mixed volumes are NOT blanket-approved.",
+  "coverage": {
+    "aaai": {
+      "2025": "catalogued",
+      "2026": "catalogued"
+    },
+    "acl": {
+      "2025": "catalogued",
+      "2026": "catalogued"
+    },
+    "cvpr": {
+      "2025": "catalogued",
+      "2026": "catalogued"
+    },
+    "iccv": {
+      "2025": "catalogued",
+      "2026": "no_verified_volume_available"
+    },
+    "icml": {
+      "2025": "catalogued",
+      "2026": "no_verified_volume_available"
+    },
+    "kdd": {
+      "2025": "catalogued",
+      "2026": "catalogued"
+    },
+    "nips": {
+      "2025": "catalogued",
+      "2026": "no_verified_volume_available"
+    },
+    "sigir": {
+      "2025": "catalogued",
+      "2026": "catalogued"
+    }
+  },
+  "volumes": {
+    "https://dblp.org/rec/conf/aaai/2025": {
+      "venue": "aaai",
+      "year": 2025,
+      "status": "mixed",
+      "track": "mixed",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/aaai/2025"
+    },
+    "https://dblp.org/rec/conf/aaai/2026": {
+      "venue": "aaai",
+      "year": 2026,
+      "status": "mixed",
+      "track": "mixed",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/aaai/2026"
+    },
+    "https://dblp.org/rec/conf/aaai/2025bridge": {
+      "venue": "aaai",
+      "year": 2025,
+      "status": "excluded",
+      "track": "bridge",
+      "source": "https://proceedings.mlr.press/v281/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/aaai/2025bridge"
+    },
+    "https://dblp.org/rec/conf/icml/2025": {
+      "venue": "icml",
+      "year": 2025,
+      "status": "verified",
+      "track": "main_research",
+      "source": "https://proceedings.mlr.press/v267/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/icml/2025"
+    },
+    "https://dblp.org/rec/conf/icml/2025p": {
+      "venue": "icml",
+      "year": 2025,
+      "status": "unresolved",
+      "track": "position",
+      "source": "https://openreview.net/group?id=ICML.cc/2025/Position_Paper_Track",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/icml/2025p"
+    },
+    "https://dblp.org/rec/conf/cvpr/2025": {
+      "venue": "cvpr",
+      "year": 2025,
+      "status": "verified",
+      "track": "main_research",
+      "source": "https://openaccess.thecvf.com/CVPR2025",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/cvpr/2025"
+    },
+    "https://dblp.org/rec/conf/cvpr/2026": {
+      "venue": "cvpr",
+      "year": 2026,
+      "status": "verified",
+      "track": "main_research",
+      "source": "https://openaccess.thecvf.com/CVPR2026",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/cvpr/2026"
+    },
+    "https://dblp.org/rec/conf/cvpr/2025w": {
+      "venue": "cvpr",
+      "year": 2025,
+      "status": "excluded",
+      "track": "workshop",
+      "source": "https://openaccess.thecvf.com/CVPR2025_workshops/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/cvpr/2025w"
+    },
+    "https://dblp.org/rec/conf/iccv/2025": {
+      "venue": "iccv",
+      "year": 2025,
+      "status": "verified",
+      "track": "main_research",
+      "source": "https://doi.org/10.1109/ICCV51701.2025",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/iccv/2025"
+    },
+    "https://dblp.org/rec/conf/iccv/2025w": {
+      "venue": "iccv",
+      "year": 2025,
+      "status": "excluded",
+      "track": "workshop",
+      "source": "https://doi.org/10.1109/ICCVW69036.2025",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/iccv/2025w"
+    },
+    "https://dblp.org/rec/conf/nips/2025": {
+      "venue": "nips",
+      "year": 2025,
+      "status": "mixed",
+      "track": "mixed",
+      "source": "https://papers.nips.cc/paper_files/paper/2025/vol38-main-conference",
+      "main_document_pattern": "https?://papers\\.nips\\.cc/paper_files/paper/2025/hash/[0-9a-f]{32}-Abstract-Conference\\.html",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/nips/2025"
+    },
+    "https://dblp.org/rec/conf/sigir/2025": {
+      "venue": "sigir",
+      "year": 2025,
+      "status": "mixed",
+      "track": "mixed",
+      "source": "https://doi.org/10.1145/3726302",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/sigir/2025"
+    },
+    "https://dblp.org/rec/conf/sigir/2026": {
+      "venue": "sigir",
+      "year": 2026,
+      "status": "mixed",
+      "track": "mixed",
+      "source": "https://doi.org/10.1145/3805712",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/sigir/2026"
+    },
+    "https://dblp.org/rec/conf/kdd/2025-1": {
+      "venue": "kdd",
+      "year": 2025,
+      "status": "mixed",
+      "track": "mixed",
+      "source": "https://doi.org/10.1145/3690624",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/kdd/2025-1"
+    },
+    "https://dblp.org/rec/conf/kdd/2025-2": {
+      "venue": "kdd",
+      "year": 2025,
+      "status": "mixed",
+      "track": "mixed",
+      "source": "https://doi.org/10.1145/3711896",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/kdd/2025-2"
+    },
+    "https://dblp.org/rec/conf/kdd/2026-1": {
+      "venue": "kdd",
+      "year": 2026,
+      "status": "mixed",
+      "track": "mixed",
+      "source": "https://doi.org/10.1145/3770854",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/kdd/2026-1"
+    },
+    "https://dblp.org/rec/conf/kdd/2026-2": {
+      "venue": "kdd",
+      "year": 2026,
+      "status": "mixed",
+      "track": "mixed",
+      "source": "https://doi.org/10.1145/3770855",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/kdd/2026-2"
+    },
+    "https://dblp.org/rec/conf/acl/2025-1": {
+      "venue": "acl",
+      "year": 2025,
+      "status": "verified",
+      "track": "long",
+      "source": "https://aclanthology.org/volumes/2025.acl-long/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2025-1"
+    },
+    "https://dblp.org/rec/conf/acl/2025-2": {
+      "venue": "acl",
+      "year": 2025,
+      "status": "verified",
+      "track": "short",
+      "source": "https://aclanthology.org/volumes/2025.acl-short/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2025-2"
+    },
+    "https://dblp.org/rec/conf/acl/2025-3": {
+      "venue": "acl",
+      "year": 2025,
+      "status": "excluded",
+      "track": "demo",
+      "source": "https://aclanthology.org/volumes/2025.acl-demo/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2025-3"
+    },
+    "https://dblp.org/rec/conf/acl/2025-4": {
+      "venue": "acl",
+      "year": 2025,
+      "status": "excluded",
+      "track": "student_workshop",
+      "source": "https://aclanthology.org/volumes/2025.acl-srw/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2025-4"
+    },
+    "https://dblp.org/rec/conf/acl/2025-5": {
+      "venue": "acl",
+      "year": 2025,
+      "status": "excluded",
+      "track": "tutorial",
+      "source": "https://aclanthology.org/volumes/2025.acl-tutorials/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2025-5"
+    },
+    "https://dblp.org/rec/conf/acl/2025-6": {
+      "venue": "acl",
+      "year": 2025,
+      "status": "unresolved",
+      "track": "industry",
+      "source": "https://aclanthology.org/volumes/2025.acl-industry/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2025-6"
+    },
+    "https://dblp.org/rec/conf/acl/2025f": {
+      "venue": "acl",
+      "year": 2025,
+      "status": "excluded",
+      "track": "findings",
+      "source": "https://aclanthology.org/volumes/2025.findings-acl/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2025f"
+    },
+    "https://dblp.org/rec/conf/acl/2026-1": {
+      "venue": "acl",
+      "year": 2026,
+      "status": "verified",
+      "track": "long",
+      "source": "https://aclanthology.org/volumes/2026.acl-long/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2026-1"
+    },
+    "https://dblp.org/rec/conf/acl/2026-2": {
+      "venue": "acl",
+      "year": 2026,
+      "status": "verified",
+      "track": "short",
+      "source": "https://aclanthology.org/volumes/2026.acl-short/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2026-2"
+    },
+    "https://dblp.org/rec/conf/acl/2026-3": {
+      "venue": "acl",
+      "year": 2026,
+      "status": "excluded",
+      "track": "demo",
+      "source": "https://aclanthology.org/volumes/2026.acl-demo/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2026-3"
+    },
+    "https://dblp.org/rec/conf/acl/2026-4": {
+      "venue": "acl",
+      "year": 2026,
+      "status": "excluded",
+      "track": "student_workshop",
+      "source": "https://aclanthology.org/volumes/2026.acl-srw/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2026-4"
+    },
+    "https://dblp.org/rec/conf/acl/2026-5": {
+      "venue": "acl",
+      "year": 2026,
+      "status": "excluded",
+      "track": "tutorial",
+      "source": "https://aclanthology.org/volumes/2026.acl-tutorials/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2026-5"
+    },
+    "https://dblp.org/rec/conf/acl/2026-6": {
+      "venue": "acl",
+      "year": 2026,
+      "status": "unresolved",
+      "track": "industry",
+      "source": "https://aclanthology.org/volumes/2026.acl-industry/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2026-6"
+    },
+    "https://dblp.org/rec/conf/acl/2026f": {
+      "venue": "acl",
+      "year": 2026,
+      "status": "excluded",
+      "track": "findings",
+      "source": "https://aclanthology.org/volumes/2026.findings-acl/",
+      "verified_at": "2026-10-20",
+      "dblp_source": "https://dblp.org/rec/conf/acl/2026f"
+    }
+  },
+  "papers": {},
+  "publisher_issues": {
+    "aaai.v39i1": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/624",
+      "official_label": "AAAI-25 Technical Tracks 1",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i2": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/625",
+      "official_label": "AAAI-25 Technical Tracks 2",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i3": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/626",
+      "official_label": "AAAI-25 Technical Tracks 3",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i4": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/627",
+      "official_label": "AAAI-25 Technical Tracks 4",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i5": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/628",
+      "official_label": "AAAI-25 Technical Tracks 5",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i6": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/629",
+      "official_label": "AAAI-25 Technical Tracks 6",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i7": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/630",
+      "official_label": "AAAI-25 Technical Tracks 7",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i8": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/631",
+      "official_label": "AAAI-25 Technical Tracks 8",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i9": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/632",
+      "official_label": "AAAI-25 Technical Tracks 9",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i10": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/633",
+      "official_label": "AAAI-25 Technical Tracks 10",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i11": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/634",
+      "official_label": "AAAI-25 Technical Tracks 11",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i12": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/635",
+      "official_label": "AAAI-25 Technical Tracks 12",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i13": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/636",
+      "official_label": "AAAI-25 Technical Tracks 13",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i14": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/637",
+      "official_label": "AAAI-25 Technical Tracks 14",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i15": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/638",
+      "official_label": "AAAI-25 Technical Tracks 15",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i16": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/639",
+      "official_label": "AAAI-25 Technical Tracks 16",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i17": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/640",
+      "official_label": "AAAI-25 Technical Tracks 17",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i18": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/641",
+      "official_label": "AAAI-25 Technical Tracks 18",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i19": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/642",
+      "official_label": "AAAI-25 Technical Tracks 19",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i20": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/652",
+      "official_label": "AAAI-25 Technical Tracks 20",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i21": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/644",
+      "official_label": "AAAI-25 Technical Tracks 21",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i22": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/645",
+      "official_label": "AAAI-25 Technical Tracks 22",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i23": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/646",
+      "official_label": "AAAI-25 Technical Tracks 23",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i24": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/647",
+      "official_label": "AAAI-25 Technical Tracks 24",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v39i25": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2025",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-39-2025/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/648",
+      "official_label": "AAAI-25 Technical Tracks 25",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i1": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/683",
+      "official_label": "AAAI-26 Technical Tracks 1",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i2": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/684",
+      "official_label": "AAAI-26 Technical Tracks 2",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i3": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/685",
+      "official_label": "AAAI-26 Technical Tracks 3",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i4": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/686",
+      "official_label": "AAAI-26 Technical Tracks 4",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i5": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/687",
+      "official_label": "AAAI-26 Technical Tracks 5",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i6": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/733",
+      "official_label": "AAAI-26 Technical Tracks 6",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i7": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/688",
+      "official_label": "AAAI-26 Technical Tracks 7",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i8": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/689",
+      "official_label": "AAAI-26 Technical Tracks 8",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i9": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/690",
+      "official_label": "AAAI-26 Technical Tracks 9",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i10": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/691",
+      "official_label": "AAAI-26 Technical Tracks 10",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i11": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/692",
+      "official_label": "AAAI-26 Technical Tracks 11",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i12": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/693",
+      "official_label": "AAAI-26 Technical Tracks 12",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i13": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/694",
+      "official_label": "AAAI-26 Technical Tracks 13",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i14": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/695",
+      "official_label": "AAAI-26 Technical Tracks 14",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i15": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/696",
+      "official_label": "AAAI-26 Technical Tracks 15",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i16": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/697",
+      "official_label": "AAAI-26 Technical Tracks 16",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i17": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/698",
+      "official_label": "AAAI-26 Technical Tracks 17",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i18": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/699",
+      "official_label": "AAAI-26 Technical Tracks 18",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i19": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/700",
+      "official_label": "AAAI-26 Technical Tracks 19",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i20": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/701",
+      "official_label": "AAAI-26 Technical Tracks 20",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i21": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/702",
+      "official_label": "AAAI-26 Technical Tracks 21",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i22": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/703",
+      "official_label": "AAAI-26 Technical Tracks 22",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i23": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/704",
+      "official_label": "AAAI-26 Technical Tracks 23",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i24": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/705",
+      "official_label": "AAAI-26 Technical Tracks 24",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i25": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/707",
+      "official_label": "AAAI-26 Technical Tracks 25",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i26": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/708",
+      "official_label": "AAAI-26 Technical Tracks 26",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i27": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/709",
+      "official_label": "AAAI-26 Technical Tracks 27",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i28": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/710",
+      "official_label": "AAAI-26 Technical Tracks 28",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i29": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/711",
+      "official_label": "AAAI-26 Technical Tracks 29",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i30": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/712",
+      "official_label": "AAAI-26 Technical Tracks 30",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i31": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/713",
+      "official_label": "AAAI-26 Technical Tracks 31",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i32": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/714",
+      "official_label": "AAAI-26 Technical Tracks 32",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i33": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/715",
+      "official_label": "AAAI-26 Technical Tracks 33",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i34": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/716",
+      "official_label": "AAAI-26 Technical Tracks 34",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i35": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/717",
+      "official_label": "AAAI-26 Technical Tracks 35",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i36": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/718",
+      "official_label": "AAAI-26 Technical Tracks 36",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i37": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/719",
+      "official_label": "AAAI-26 Technical Tracks 37",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i38": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/720",
+      "official_label": "AAAI-26 Technical Tracks 38",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i39": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/721",
+      "official_label": "AAAI-26 Technical Tracks 39",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i40": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/722",
+      "official_label": "AAAI-26 Technical Tracks 40",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i41": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/723",
+      "official_label": "AAAI-26 Technical Tracks 41",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i42": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/724",
+      "official_label": "AAAI-26 Technical Tracks 42",
+      "verified_at": "2026-10-20"
+    },
+    "aaai.v40i43": {
+      "proceedings_id": "https://dblp.org/rec/conf/aaai/2026",
+      "track": "main_technical",
+      "status": "verified",
+      "source": "https://aaai.org/proceeding/aaai-40-2026/",
+      "issue_source": "https://ojs.aaai.org/index.php/AAAI/issue/view/725",
+      "official_label": "AAAI-26 Technical Tracks 43",
+      "verified_at": "2026-10-20"
+    }
+  }
+}

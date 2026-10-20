@@ -21,6 +21,11 @@ def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enab
         raise ValueError("SEMANTIC_MODE must be off, shadow or production")
     payload.setdefault("semantic", {})["enabled"] = semantic_mode != "off"
     payload["semantic"]["mode"] = "production" if semantic_mode == "production" else "shadow"
+    relation_mode = os.environ.get("RELATION_MODE", "shadow") or "shadow"
+    if relation_mode not in ("shadow", "production"):
+        raise ValueError("RELATION_MODE must be shadow or production")
+    payload.setdefault("relation_policy", {}).update(enabled=True, mode=relation_mode,
+                                                    calibration_file=str(state_dir / "relation-calibration.json"))
     payload.setdefault("selection", {})["calibration_file"] = str(state_dir / "calibration.json")
     payload["max_results"] = max_results
     payload["seen_db"] = str(state_dir / "seen.json")

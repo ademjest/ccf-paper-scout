@@ -22,13 +22,16 @@ def load_config(path: Path) -> dict[str, Any]:
     mode = payload.get("semantic", {}).get("mode", "shadow")
     if mode not in ("shadow", "production"):
         raise ValueError("semantic.mode must be shadow or production")
-    calibration_file = payload.get("selection", {}).get("calibration_file")
-    if calibration_file:
-        calibration_path = Path(calibration_file)
-        if not calibration_path.is_absolute():
-            calibration_path = path.resolve().parent / calibration_path
-        if calibration_path.exists():
-            payload["selection"]["calibration"] = json.loads(calibration_path.read_text(encoding="utf-8"))
+    if payload.get("relation_policy", {}).get("mode", "shadow") not in ("shadow", "production"):
+        raise ValueError("relation_policy.mode must be shadow or production")
+    for section in ("selection", "relation_policy"):
+        calibration_file = payload.get(section, {}).get("calibration_file")
+        if calibration_file:
+            calibration_path = Path(calibration_file)
+            if not calibration_path.is_absolute():
+                calibration_path = path.resolve().parent / calibration_path
+            if calibration_path.exists():
+                payload[section]["calibration"] = json.loads(calibration_path.read_text(encoding="utf-8"))
     return payload
 
 

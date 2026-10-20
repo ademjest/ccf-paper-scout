@@ -7,6 +7,7 @@ from pathlib import Path
 
 import paper_scout
 from ccf_paper_scout.discovery import discover
+from ccf_paper_scout.proceedings import gate
 from state_store import StateStore
 
 
@@ -22,7 +23,13 @@ def main() -> None:
             second, _ = discover(store, {"aaai": venue}, [2026], config, "ccf-paper-scout/0.2", paper_scout.fetch_dblp_page)
             assert offset == 2 and store.load_cursor("DBLP", "aaai", 2026) == 4
             assert len(store.candidates(["aaai"], [2026])) == 4
-            print(json.dumps({"first": first, "second": second, "saved_candidates": 4}, indent=2))
+            papers = store.candidates(["aaai"], [2026])
+            assert all(p.get("proceedings_id") for p in papers)
+            verified, qualification = gate(papers, store)
+            assert verified, "public AAAI sample no longer has verified technical-track evidence; inspect catalog"
+            migrated = paper_scout.lookup_dblp_proceedings([papers[0]["id"]], "ccf-paper-scout/0.2", config)
+            assert migrated[papers[0]["id"]]["proceedings_id"] == papers[0]["proceedings_id"]
+            print(json.dumps({"first": first, "second": second, "saved_candidates": 4, "qualification": qualification}, indent=2))
         finally:
             store.close()
 

@@ -30,6 +30,11 @@ def select(papers: list[dict[str, Any]], limit: int, config: dict[str, Any],
         review = paper.get("relevance_review")
         if config.get("relevance_review", {}).get("enabled") and (not review or review.get("decision") != "relevant"):
             reason = "review_uncertain_or_irrelevant"
+        if config.get("relation_policy", {}).get("enabled") and config["relation_policy"].get("mode", "shadow") == "production":
+            if paper.get("relation_decision") != "allow":
+                reason = "relation_" + paper.get("relation_decision", "defer")
+        if config.get("main_conference", {}).get("enabled", True) and paper.get("main_conference_status") != "verified":
+            reason = "main_conference_unverified"
         paper["selection_reason"] = reason
         if reason == "qualified":
             qualified.append(paper)

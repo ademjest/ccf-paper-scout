@@ -21,6 +21,18 @@
     "sparql_fallback": true
   },
   "max_results": 10,
+  "main_conference": {
+    "enabled": true,
+    "max_backfill_papers_per_run": 1000
+  },
+  "relation_policy": {
+    "enabled": true,
+    "mode": "shadow",
+    "review": {
+      "enabled": true,
+      "max_candidates_per_run": 20
+    }
+  },
   "selection": {
     "min_lexical_score": 0.05,
     "allow_title_only": false,
