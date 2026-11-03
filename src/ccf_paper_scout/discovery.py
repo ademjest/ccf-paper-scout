@@ -95,6 +95,7 @@ def discover(store: Any, venues: dict[str, dict[str, Any]], years: list[int], co
                 if transport == "search" and start >= int(config.get("search_max_offset", 1000)):
                     raise RuntimeError("Search pagination bound reached; switch dblp.transport to sparql")
                 stats["pages"] += 1
+                print(f"DBLP request {stats['pages']}/{budget}: venue={key} year={year} offset={start}")
                 page, total, raw = fetch_page(venue, year, page_size, start, user_agent, {**config, "transport": transport})
                 done = raw < page_size or (total is not None and start + raw >= total)
                 # Save the old initialization flag with the page, so bootstrap records remain historical.

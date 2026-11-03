@@ -324,6 +324,7 @@ def fetch_zotero(
         while True:
             url = initial + "&" + urllib.parse.urlencode({"start": start})
             req = urllib.request.Request(url, headers=headers)
+            print(f"      Zotero page request: offset={start}; purpose={'interests' if use_collection_filter else 'dedup'}")
             try:
                 batch = open_json(req, timeout=30)
             except urllib.error.HTTPError as exc:
@@ -918,6 +919,7 @@ def translate_papers(
             method="POST",
         )
         try:
+            print(f"      LLM card request: completed={translated_count + cache_hits}/{len(papers)}")
             response = post_json(req, timeout=int(config.get("timeout_seconds", 90)))
             content = response["choices"][0]["message"]["content"]
             translated = validate_analysis_payload(parse_json_object(content))
@@ -1313,6 +1315,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     thresholds = None
     semantic_production = config.get("semantic", {}).get("enabled", False) and config.get("semantic", {}).get("mode", "shadow") == "production"
     if config.get("semantic", {}).get("enabled", False) and ranked:
+        print("      Semantic ranking: loading model and updating vectors...")
         semantic_started = time.monotonic()
         semantic_stats = semantic.rank(ranked, interests, config, store)
         semantic_stats["seconds"] = round(time.monotonic() - semantic_started, 3)
@@ -1328,12 +1331,14 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
             ranked.sort(key=lambda p: p.get("semantic_score", -2), reverse=True)
     relation_stats = {}
     if config.get("relation_policy", {}).get("enabled"):
+        print("      Reviewing LLM/RL roles...")
         if not config.get("semantic", {}).get("enabled"):
             for paper in ranked:
                 for field in ("relation_scores", "relation_margin", "relation_signature"):
                     paper.pop(field, None)
         relation_stats = relations.assess(ranked, config, store, user_agent, post_json, parse_json_object,
                                           allow_network=not args.evaluate_only)
+        print("relations:", json.dumps(relation_stats))
         for paper in ranked:
             labels = paper["relation_review"]["labels"]
             # Co-occurrence is not evidence of LLM -> RL, even in shadow reports.
@@ -1454,6 +1459,7 @@ def main() -> int:
         print(f"SMTP test delivery accepted for {smtp_config.get('receiver', '(missing)')}")
         return 0
     if args.no_update_seen:
+        print("Preview: copying state into an isolated workspace; SMTP disabled.")
         with tempfile.TemporaryDirectory(prefix="paper-scout-preview-") as temporary:
             config = isolated_config(config, args.config.resolve().parent, Path(temporary))
             with RunLock(Path(config["run_lock"])):

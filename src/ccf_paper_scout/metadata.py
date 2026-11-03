@@ -55,6 +55,7 @@ def enrich(papers: list[dict[str, Any]], store: Any, config: dict[str, Any], use
                 continue
             time.sleep(max(0, 1 - (time.monotonic() - last_request.get(host, 0))))
             stats["requests"] += 1
+            print(f"metadata request {stats['requests']}/{budget}: source={source}; enriched={stats['enriched']}")
             attempt = {"source": source, "url": source_url}
             attempts.append(attempt)
             try:

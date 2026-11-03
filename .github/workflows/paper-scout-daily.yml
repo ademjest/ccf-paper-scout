@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHONUNBUFFERED: '1'
+
 concurrency:
   group: paper-scout-production
   cancel-in-progress: false

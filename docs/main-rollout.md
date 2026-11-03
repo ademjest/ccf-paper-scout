@@ -33,6 +33,8 @@ gh workflow run paper-scout-manual.yml --repo ademjest/ccf-paper-scout --ref upd
 
 检查该目录的 `recommendations.md` 和 `recommendations.diagnostics.json`：是否符合新方向、是否有重复投递、`metadata.enriched/invalidated/failed`、主会核验与摘要缺失原因、实际 `selected_ids`。数量少于 10 不自动代表失败；没有合格论文时不会凑数。
 
+Preview 会执行完整扫描、摘要补齐、排序与中文卡片生成，`max_results=10` 只限制最终推荐数量。默认预算为 80 页扫描、200 次摘要请求、最多 500 篇候选向量更新；首次运行可能超过十分钟。Actions 已开启 Python 即时日志，并在外部请求前输出进度。预览产生的缓存与扫描游标不会写回生产状态，因此重复预览仍可能重复这些工作。若要使用修复后的日志，请在 `update-paper` 分支重新点击 **Run workflow**；旧运行的 **Re-run jobs** 仍使用旧提交。
+
 shadow 下实际邮件仍由词项排序及质量门槛决定，语义只提供诊断。不要为了让语义立即接管而设置 production 或伪造校准批准。
 
 ## 3. 设置每日使用的变量
