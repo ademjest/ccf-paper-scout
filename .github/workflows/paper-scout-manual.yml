@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         default: doctor
-        options: [doctor, smtp-test, discover, evaluate, preview, production]
+        options: [doctor, smtp-test, discover, evaluate, preview, production, research]
       semantic_mode:
         description: Embedding mode (production requires private calibration.json)
         type: choice
@@ -32,7 +32,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  research:
+    if: inputs.mode == 'research'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: ./.github/actions/setup-semantic
+        with:
+          mode: shadow
+      - name: Warm the pinned public embedding model
+        run: |
+          echo "HF_HOME=$HOME/.cache/huggingface" >> "$GITHUB_ENV"
+          python -c 'from ccf_paper_scout.semantic import Encoder; Encoder({})'
+      - name: Collect official abstracts and compare research profiles
+        env:
+          PYTHONUTF8: '1'
+        run: python scripts/research_experiment.py --output local-notes/actions-research --abstract-budget 80
+      - name: Save public experiment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-experiment-${{ github.run_id }}
+          path: |
+            local-notes/actions-research/*.json
+            local-notes/actions-research/*.html
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Report location
+        if: success()
+        run: echo 'Download the research-experiment artifact and open results.html. This public experiment uses no private library, email, or LLM API secrets; rankings remain shadow.' >> "$GITHUB_STEP_SUMMARY"
   run:
+    if: inputs.mode != 'research'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

@@ -114,6 +114,9 @@ DBLP Search API 可能对云端出口返回 HTTP 200 的反机器人 HTML 页面
 
 ## 本地命令
 
+需要比较词项与语义排序、保存完整候选快照或制作人工标注集时，见
+[离线排序评测指南](docs/offline-benchmark.md)。该流程使用独立实验目录，不发送邮件。
+
 ```bash
 ccf-paper-scout --help
 ccf-paper-scout doctor --config config.json
@@ -125,10 +128,12 @@ ccf-paper-scout run --config config.json --output recommendations.md
 
 仓库保留两个业务工作流：
 
-- `Paper Scout Manual`：`doctor`、`smtp-test`、`discover`、`evaluate`、`preview`、`production`；
+- `Paper Scout Manual`：`doctor`、`smtp-test`、`discover`、`evaluate`、`preview`、`production`、`research`；
 - `Paper Scout Daily`：每日自动推荐。
 
 另有 `Keep Scheduled Workflows Active`，用于降低公开仓库长时间无提交后 schedule 被暂停的概率。
+
+`research` 可在 `update-paper` 分支运行新的 RL 行动策略／世界模型画像实验：定向检索公开论文、核对官方摘要、比较新旧画像与三种排序，并提供 HTML/JSON 下载。此模式无需 Zotero、SMTP、LLM 或私有状态仓库 Secrets，不发送邮件。操作步骤见 [Actions 研究实验](docs/research-actions.md)。
 
 ### 1. 创建私有状态仓库
 

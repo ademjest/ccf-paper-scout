@@ -129,6 +129,8 @@ def rank(papers: list[dict[str, Any]], interests: list[dict[str, Any]], config: 
         else:
             pending.append(paper)
     maximum = max(0, int(settings.get("max_updated_papers_per_run", 500)))
+    # Evidence-bearing candidates take priority over title-only records under a budget.
+    pending.sort(key=lambda paper: (not bool(paper.get("abstract")), paper["id"]))
     to_encode = pending[:maximum]
     encoded = encoder.encode_papers(to_encode)
     for paper, vector in zip(to_encode, encoded):
@@ -139,6 +141,8 @@ def rank(papers: list[dict[str, Any]], interests: list[dict[str, Any]], config: 
         vector = vectors.get(paper["id"])
         if vector is None:
             paper["semantic_deferred"] = True
+            for field in ("semantic_score", "semantic_direction", "direction_scores", "semantic_references"):
+                paper.pop(field, None)
             continue
         paper.pop("semantic_deferred", None)
         reference_scores = sorted([(cosine(vector, ref), item["title"]) for item, ref in reference_vectors], reverse=True)
@@ -153,7 +157,12 @@ def rank(papers: list[dict[str, Any]], interests: list[dict[str, Any]], config: 
     if config.get("relation_policy", {}).get("enabled"):
         from .relations import score
         relation_stats = score(papers, vectors, encoder, store)
-    return {"relations": relation_stats, "cache_hits": hits, "encoded": len(encoded), "deferred": len(pending) - len(to_encode),
+    modalities = {}
+    for name, has_abstract in (("abstract", True), ("title_only", False)):
+        group = [p for p in papers if bool(p.get("abstract")) == has_abstract]
+        modalities[name] = {"total": len(group), "scored": sum(p["id"] in vectors for p in group),
+                            "deferred": sum(p["id"] not in vectors for p in group)}
+    return {"relations": relation_stats, "cache_hits": hits, "encoded": len(encoded), "deferred": len(pending) - len(to_encode), "modalities": modalities,
             "profile_hash": profile_hash, "model_signature": encoder.signature}
 
 

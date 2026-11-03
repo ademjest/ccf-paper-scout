@@ -1,0 +1,54 @@
+{
+  "explicit_interests": [
+    "reinforcement learning",
+    "hierarchical policy learning",
+    "goal-conditioned reinforcement learning",
+    "world models",
+    "model-based planning",
+    "self-play",
+    "imitation learning",
+    "LLM-assisted reinforcement learning",
+    "vision-language action agents",
+    "reward design"
+  ],
+  "research_profile": {
+    "directions": [
+      {
+        "name": "action and planning policies",
+        "description": "Learning policies that generate actions, subgoals and long-horizon plans in interactive environments. Hierarchical and goal-conditioned reinforcement learning, offline trajectory learning, Decision Transformers, and imitation learning for navigation, robot control and multi-agent pathfinding."
+      },
+      {
+        "name": "world models and predictive control",
+        "description": "Learning action-conditioned environment dynamics and latent world models for model-based reinforcement learning, imagined rollouts and planning. State prediction and forecasting that improve control policies in non-stationary environments."
+      },
+      {
+        "name": "language models assisting RL training",
+        "description": "Large language models help train reinforcement learning agents that act in environments: generating reward code, shaping trajectory rewards, temporal credit assignment, exploration and curriculum design, refining actions and improving external control policies."
+      },
+      {
+        "name": "vision-language action policies",
+        "description": "Reinforcement learning and imitation learning train vision-language agents to execute multi-step actions in Android interfaces, games, embodied environments and robot control. Efficient exploration of action tokens and goal-directed sequential decisions."
+      },
+      {
+        "name": "self-play for game policies",
+        "description": "Reinforcement learning agents learn action strategies for competitive games through self-play, opponent populations and league training, with policy improvement and long-horizon decision making."
+      }
+    ]
+  },
+  "topic_priority": {
+    "primary_topics": [
+      "reinforcement learning",
+      "world model",
+      "imitation learning",
+      "goal-conditioned",
+      "decision transformer",
+      "self-play"
+    ],
+    "exploration_topics": [
+      "multi-agent reinforcement learning"
+    ],
+    "primary_topic_boost": 2.0,
+    "exploration_topic_boost": 0.2,
+    "max_exploration_results": 1
+  }
+}
