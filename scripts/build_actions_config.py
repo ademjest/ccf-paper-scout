@@ -16,6 +16,14 @@ def build(base: Path, output: Path, state_dir: Path, max_results: int, smtp_enab
     if missing:
         raise RuntimeError("missing Actions configuration: " + ", ".join(missing))
     payload = json.loads(base.read_text(encoding="utf-8"))
+    profile_name = os.environ.get("RESEARCH_PROFILE", "legacy") or "legacy"
+    if profile_name not in ("legacy", "rl-action-world-models"):
+        raise ValueError("RESEARCH_PROFILE must be legacy or rl-action-world-models")
+    if profile_name != "legacy":
+        profile = json.loads((Path(__file__).resolve().parents[1] / "profiles" / (profile_name + ".json")).read_text(encoding="utf-8"))
+        for key in ("explicit_interests", "research_profile", "topic_priority"):
+            payload[key] = profile[key]
+    payload["research_profile_name"] = profile_name
     semantic_mode = os.environ.get("SEMANTIC_MODE", "off") or "off"
     if semantic_mode not in ("off", "shadow", "production"):
         raise ValueError("SEMANTIC_MODE must be off, shadow or production")

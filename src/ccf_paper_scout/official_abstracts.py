@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import urllib.request
 from html.parser import HTMLParser
 from urllib.parse import urlsplit, urlunsplit
 
@@ -11,6 +12,10 @@ def official_url(paper: dict) -> str | None:
     url = urlsplit(str(paper.get("ee", "")))
     if url.scheme not in ("http", "https") or url.username or url.password or url.port:
         return None
+    if url.hostname in ("doi.org", "dx.doi.org"):
+        match = re.fullmatch(r"/10\.18653/v1/((\d{4})\.acl-(?:long|short)\.\d+)", url.path, re.I)
+        if match and int(match[2]) == paper.get("year"):
+            return "https://aclanthology.org/" + match[1].lower() + "/"
     if url.hostname == "proceedings.mlr.press" and re.fullmatch(r"/v\d+/[\w-]+\.html", url.path):
         return urlunsplit(("https", url.hostname, url.path, "", ""))
     if url.hostname == "aclanthology.org":
@@ -22,6 +27,26 @@ def official_url(paper: dict) -> str | None:
         if match and int(match[1]) == paper.get("year"):
             return urlunsplit(("https", "proceedings.neurips.cc", url.path, "", ""))
     return None
+
+
+def is_bibliographic_placeholder(text: str) -> bool:
+    """Reject the observed author + proceedings + year pseudo-abstract shape."""
+    return len(text) < 800 and bool(re.search(r"\.\s*Proceedings of .+\.\s*\d{4}\.?\s*$", text, re.I))
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def fetch(url: str, user_agent: str) -> str:
+    # One request, no implicit retries/redirects outside the shared metadata budget.
+    request = urllib.request.Request(url, headers={"User-Agent": user_agent})
+    with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
+        body = response.read(2_000_001)
+        if len(body) > 2_000_000:
+            raise ValueError("response_too_large")
+        return body.decode("utf-8")
 
 
 def normalized(text: str) -> str:

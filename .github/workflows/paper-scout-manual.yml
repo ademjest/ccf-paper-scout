@@ -23,6 +23,11 @@ on:
         type: choice
         default: shadow
         options: [shadow, production]
+      research_profile:
+        description: Interest profile for preview, evaluate and production
+        type: choice
+        default: rl-action-world-models
+        options: [legacy, rl-action-world-models]
 
 permissions:
   contents: read
@@ -107,6 +112,7 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           SEMANTIC_MODE: ${{ inputs.semantic_mode }}
           RELATION_MODE: ${{ inputs.relation_mode }}
+          RESEARCH_PROFILE: ${{ inputs.research_profile }}
         run: |
           case "$REQUESTED_MAX_RESULTS" in (*[!0-9]*|'') echo "max_results must be an integer"; exit 2;; esac
           if [ "$REQUESTED_MAX_RESULTS" -lt 1 ] || [ "$REQUESTED_MAX_RESULTS" -gt 20 ]; then echo "max_results must be 1..20"; exit 2; fi

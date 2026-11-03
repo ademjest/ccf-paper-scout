@@ -41,6 +41,7 @@
     "new_discovery_slots": 7
   },
   "metadata": {
+    "official_sources": true,
     "max_requests_per_run": 200,
     "exploration_fraction": 0.2
   },

@@ -36,7 +36,7 @@ if os.name == "nt":
 else:
     import fcntl
 
-from ccf_paper_scout import discovery, metadata, proceedings, relations, selection, semantic
+from ccf_paper_scout import discovery, metadata, official_abstracts, proceedings, relations, selection, semantic
 
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#-]{1,}|[\u4e00-\u9fff]{2,}")
 ANALYSIS_SCHEMA_VERSION = 2
@@ -1300,7 +1300,9 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     topic_priority = dict(config.get("topic_priority", {}))
     title_ranked = apply_topic_priorities(title_ranked, topic_priority)
     print("[5/7] Updating bounded metadata and semantic caches...")
-    metadata_stats = {} if args.evaluate_only else metadata.enrich(title_ranked, store, config.get("metadata", {}), user_agent, request_json, normalize_doi, openalex_abstract)
+    metadata_stats = {} if args.evaluate_only else metadata.enrich(
+        title_ranked, store, config.get("metadata", {}), user_agent,
+        lambda url, agent: json.loads(official_abstracts.fetch(url, agent)), normalize_doi, openalex_abstract)
     print("metadata:", json.dumps(metadata_stats))
     ranked = rank_candidates(interests, title_ranked, config.get("explicit_interests", []))
     ranked = apply_topic_priorities(ranked, topic_priority)

@@ -135,6 +135,8 @@ ccf-paper-scout run --config config.json --output recommendations.md
 
 `research` 可在 `update-paper` 分支运行新的 RL 行动策略／世界模型画像实验：定向检索公开论文、核对官方摘要、比较新旧画像与三种排序，并提供 HTML/JSON 下载。此模式无需 Zotero、SMTP、LLM 或私有状态仓库 Secrets，不发送邮件。操作步骤见 [Actions 研究实验](docs/research-actions.md)。
 
+将当前分支接入正式每日推送的配置、预览、合并与历史保留步骤见 [main 升级操作指南](docs/main-rollout.md)。
+
 ### 1. 创建私有状态仓库
 
 创建一个 private 仓库，例如：
