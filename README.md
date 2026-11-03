@@ -14,18 +14,24 @@ CCF Paper Scout 是一个面向个人研究者的自动论文推荐程序。它�
 GitHub Actions
   → 恢复私有状态
   → 读取 Zotero 兴趣文献
-  → 分页检索 DBLP Search API，受阻时自动切换 DBLP SPARQL
-  → CCF-A 白名单与 DBLP record-key 校验
+  → 按动态年份、全局预算和持久游标扫描 DBLP（默认官方 SPARQL）
+  → 保存完整候选库并周期复查；发现进度不依赖是否已推送
+  → CCF-A 白名单与具体 proceedings／官方轨道证据硬过滤（未知暂缓）
   → 排除已推送论文和 Zotero 已收藏论文
-  → 本地相关性排序与主题优先级
-  → OpenAlex 补充英文摘要
-  → 选择最多 10 篇论文
+  → 有预算、负缓存和正文哈希的 OpenAlex 摘要补全
+  → 归一化词项排序，可选 CPU embedding / 相关性复核
+  → LLM／RL 作用方向原型与独立证据复核（默认 shadow，正式模式强制准入）
+  → 质量门槛与新发现/历史队列，最多 10 篇，不用其他方向补位
   → LLM 生成中文论文卡片（可选）
   → SMTP 投递
   → 持久化 SQLite 和去重状态
 ```
 
-LLM 不参与 CCF-A 资格判断、去重、核心排序和最终选文。它只处理最终入选论文的标题和摘要，用于生成中文标题、中文摘要、问题、方法、创新、证据、局限、推荐理由和主题标签。
+LLM 不参与 CCF-A 出版资格判断和去重。关系复核与最终中文卡片分开，每轮最多审核 20 篇边界候选，要求摘要原句证据。CPU embedding 默认关闭，可先使用 shadow 模式评估；正式接管兴趣排序需要匹配模型与画像的人工审查校准，关系原型另有独立的校准版本。
+
+主会与 LLM／RL 关系升级的范围、保守暂缓边界及 Actions 测试步骤见 [实施与审查说明](docs/main-conference-and-relations-implementation.md)。
+
+`update-paper` 的实施内容、迁移方法、测试结果和 Actions 启用步骤见 [部署说明](docs/update-paper-implementation.md)。原始设计见 [优化方案](docs/recommendation-quality-and-discovery-plan.md)。
 
 ## 环境要求
 
@@ -74,16 +80,19 @@ ccf-paper-scout run \
 
 编辑复制得到的 `config.json`：
 
-- `years`：检索年份；
+- `year_policy`：默认按北京时间自动查询当前年与上一年，并低频探测下一年；固定年份使用 `year_policy.mode=fixed` 和 `years`；
 - `venue_keys`：允许检索的 DBLP venue key；
 - `dblp`：分页、全局限速、瞬时错误重试、SPARQL 降级和部分分区失败策略；
 - `max_results`：每次最多推荐数量，当前默认 10；
-- `min_score`：最低相关性分数；
+- `selection`：质量门槛、是否允许仅标题、探索上限和新发现队列；
+- `semantic`：可选 CPU embedding，固定模型 revision、增量预算与 shadow/production 模式；
+- `main_conference`：主会资格硬过滤、历史候选论文集回填预算；
+- `relation_policy`：LLM→RL、RL→LLM、LLM 多智能体 RL 独立分类与证据复核，默认 shadow；
 - `explicit_interests`：显式主要研究方向；
 - `topic_priority.primary_topics`：主要方向；
 - `topic_priority.exploration_topics`：拓展方向；
 - `topic_priority.max_exploration_results`：拓展方向最大篇数；
-- `openalex_enrich_limit`：OpenAlex 摘要补全上限；
+- `metadata.max_requests_per_run`：OpenAlex 每次运行的请求上限，默认 200，缺摘要与失败结果会缓存；
 - `recent_interest_items`：用于兴趣建模的近期 Zotero 文献数量；
 - `zotero_collection_keys`：限定参与兴趣建模的 Zotero collections；
 - `state_db`、`seen_db`：SQLite 和兼容去重状态路径。
@@ -94,7 +103,8 @@ ccf-paper-scout run \
 
 DBLP Search API 可能对云端出口返回 HTTP 200 的反机器人 HTML 页面。程序会先检查
 `Content-Type` 和正文特征，不会把验证页面当作 JSON 重试；两个 Search API 域名均不可用时，
-当前进程会熔断搜索接口并自动使用官方 SPARQL 服务。`dblp.request_delay_seconds` 应保持至少
+独立搜索接口调用会熔断并降级到官方 SPARQL 服务；持久发现默认直接使用 SPARQL，并固定
+单轮 transport，避免跨端点混用分页偏移。`dblp.request_delay_seconds` 应保持至少
 2–3 秒，使所有 DBLP 请求共享同一个进程级间隔。`dblp.max_attempts` 只作用于 429、5xx、
 超时和连接中断，不作用于反机器人页面或结构错误。
 
@@ -103,6 +113,9 @@ DBLP Search API 可能对云端出口返回 HTTP 200 的反机器人 HTML 页面
 [`docs/dblp-resilience-improvement.md`](docs/dblp-resilience-improvement.md)。
 
 ## 本地命令
+
+需要比较词项与语义排序、保存完整候选快照或制作人工标注集时，见
+[离线排序评测指南](docs/offline-benchmark.md)。该流程使用独立实验目录，不发送邮件。
 
 ```bash
 ccf-paper-scout --help
@@ -115,10 +128,14 @@ ccf-paper-scout run --config config.json --output recommendations.md
 
 仓库保留两个业务工作流：
 
-- `Paper Scout Manual`：`doctor`、`smtp-test`、`preview`、`production`；
+- `Paper Scout Manual`：`doctor`、`smtp-test`、`discover`、`evaluate`、`preview`、`production`、`research`；
 - `Paper Scout Daily`：每日自动推荐。
 
 另有 `Keep Scheduled Workflows Active`，用于降低公开仓库长时间无提交后 schedule 被暂停的概率。
+
+`research` 可在 `update-paper` 分支运行新的 RL 行动策略／世界模型画像实验：定向检索公开论文、核对官方摘要、比较新旧画像与三种排序，并提供 HTML/JSON 下载。此模式无需 Zotero、SMTP、LLM 或私有状态仓库 Secrets，不发送邮件。操作步骤见 [Actions 研究实验](docs/research-actions.md)。
+
+将当前分支接入正式每日推送的配置、预览、合并与历史保留步骤见 [main 升级操作指南](docs/main-rollout.md)。
 
 ### 1. 创建私有状态仓库
 
@@ -208,7 +225,7 @@ GitHub-hosted schedule 是 best-effort，提前调度只是根据历史延迟进
 - Zotero 文献在运行环境中用于本地兴趣建模；
 - DBLP 接收 venue、年份和查询参数；
 - OpenAlex 接收候选 DOI；
-- LLM 只接收最终入选论文的标题、摘要和显式兴趣方向；
+- 翻译 LLM 接收最终入选论文的标题、摘要和显式兴趣方向；独立关系复核还会接收每轮有预算上限的边界候选标题及摘要；
 - 完整 Zotero 文库、推荐历史、SQLite、SMTP 授权码和各类 API Key 不应进入公开仓库；
 - 报告、调试导出、测试、设计文档和个人分析文件由 `.gitignore` 保持在本地。
 

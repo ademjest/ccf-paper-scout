@@ -7,6 +7,11 @@ config.action.json
 state/
 .runtime-state/
 recommendations*.md
+recommendations*.json
+*.egg-info/
+build/
+dist/
+.model-cache/
 zotero_library_debug.md
 *.log
 

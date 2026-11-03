@@ -1,0 +1,7 @@
+# Tested CPU inference stack for Python 3.11/3.12; install torch from its CPU index first.
+torch==2.6.0
+sentence-transformers==3.4.1
+transformers==4.48.3
+huggingface-hub==0.28.1
+tokenizers==0.21.0
+numpy==2.2.2
