@@ -8,6 +8,15 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
+class DiscoveryUnavailableError(RuntimeError):
+    """A failed scan with enough context to decide whether a cache is usable."""
+
+    def __init__(self, message: str, stats: dict[str, Any], failures: list[dict[str, Any]]):
+        super().__init__(message)
+        self.stats = dict(stats)
+        self.failures = list(failures)
+
+
 def resolve_years(config: dict[str, Any], today: dt.date | None = None) -> list[int]:
     policy = config.get("year_policy", {})
     mode = policy.get("mode", "fixed" if config.get("years") else "rolling")
@@ -119,16 +128,24 @@ def discover(store: Any, venues: dict[str, dict[str, Any]], years: list[int], co
         except RuntimeError as exc:
             state["last_error"] = str(exc)
             store.save_discovery_page(key, year, [], state)
-            failures.append({"venue": venue.get("abbr", key), "venue_key": key, "year": year, "error": str(exc)})
+            print(f"source=DBLP venue={venue.get('abbr', key)} year={year} status=failed "
+                  f"request_offset={start} retained_offset={state.get('next_offset', 0)} error={exc}")
+            failures.append({"venue": venue.get("abbr", key), "venue_key": key, "year": year,
+                             "error": str(exc), "transient": bool(getattr(exc, "transient", False))})
             active_failures += not is_probe
             if (getattr(exc, "global_failure", False) or config.get("failure_policy") == "strict" or
                     (active_failures >= 2 and active_failures == active_attempts)):
-                raise RuntimeError("DBLP source unavailable; discovery cursor retained") from exc
+                stats["success_ratio"] = (active_attempts - active_failures) / active_attempts if active_attempts else 1.0
+                raise DiscoveryUnavailableError("DBLP source unavailable; discovery cursor retained", stats, failures) from exc
+            continue
         print(f"source=DBLP venue={venue.get('abbr', key)} year={year} status={state.get('status', 'error')} offset={state.get('next_offset', 0)}")
     ratio = (active_attempts - active_failures) / active_attempts if active_attempts else 1.0
     stats["success_ratio"] = ratio
     if ratio < float(config.get("minimum_success_ratio", 0.75)):
-        raise RuntimeError(f"DBLP success ratio {ratio:.3f} below configured minimum; source_unavailable")
+        raise DiscoveryUnavailableError(
+            f"DBLP success ratio {ratio:.3f} below configured minimum "
+            f"({active_attempts - active_failures}/{active_attempts} active partitions succeeded); "
+            "source_unavailable; see per-partition errors above", stats, failures)
     if stats["overdue"]:
         print(f"warning: discovery overdue_cycles={stats['overdue']}; increase budget or reduce partitions")
     return stats, failures

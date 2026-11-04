@@ -14,6 +14,7 @@
     "overlap_pages": 1,
     "full_cycle_target_days": 7,
     "failure_policy": "continue",
+    "allow_cached_on_transient_failure": true,
     "minimum_success_ratio": 0.75,
     "request_delay_seconds": 3.0,
     "timeout_seconds": 30,

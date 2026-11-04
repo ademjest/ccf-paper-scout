@@ -113,6 +113,7 @@ class DailyRolloutTests(unittest.TestCase):
         self.assertFalse(config["delivery"]["smtp"]["enabled"])
         self.assertEqual(config["semantic"]["mode"], "shadow")
         self.assertEqual(config["relation_policy"]["mode"], "shadow")
+        self.assertTrue(config["dblp"]["allow_cached_on_transient_failure"])
         with mock.patch.dict("os.environ", {**env, "RESEARCH_PROFILE": "../../private"}, clear=True):
             with self.assertRaises(ValueError):
                 build(ROOT / "config.example.json", output, self.root, 10)

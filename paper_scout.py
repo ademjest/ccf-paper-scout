@@ -75,6 +75,8 @@ class DblpProtocolError(DblpError):
 class DblpRequestError(DblpError):
     """DBLP remained unavailable after bounded transient retries."""
 
+    transient = True
+
 
 class DblpUnavailableError(DblpError):
     """All configured DBLP access paths failed for one request."""
@@ -261,11 +263,15 @@ def request_dblp_json(
             last = exc
             if attempt < attempts - 1:
                 retry_after = exc.headers.get("Retry-After") if exc.headers else None
-                time.sleep(_retry_after_seconds(retry_after, attempt))
+                delay = _retry_after_seconds(retry_after, attempt)
+                print(f"DBLP retry {attempt + 1}/{attempts}: HTTP {exc.code}; wait={delay:.1f}s", file=sys.stderr)
+                time.sleep(delay)
         except (urllib.error.URLError, TimeoutError, http.client.RemoteDisconnected) as exc:
             last = exc
             if attempt < attempts - 1:
-                time.sleep(2 ** (attempt + 1) + random.uniform(0.0, 1.0))
+                delay = 2 ** (attempt + 1) + random.uniform(0.0, 1.0)
+                print(f"DBLP retry {attempt + 1}/{attempts}: {type(exc).__name__}; wait={delay:.1f}s", file=sys.stderr)
+                time.sleep(delay)
     raise DblpRequestError(
         f"DBLP request failed after {attempts} attempts via {urllib.parse.urlsplit(url).netloc}: {last}"
     )
@@ -1156,14 +1162,18 @@ def render_report(
     papers: list[dict[str, Any]], interest_count: int, candidate_count: int,
     failed_sources: list[dict[str, Any]] | None = None,
     quality_summary: dict[str, Any] | None = None,
+    *, cached_discovery: bool = False,
 ) -> str:
     now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     lines = ["# CCF-A 兴趣论文推荐", "", f"生成时间：{now}", f"兴趣库：{interest_count} 篇；CCF-A 候选：{candidate_count} 篇；本次输出：{len(papers)} 篇。", ""]
+    if cached_discovery:
+        lines += ["**数据源异常：DBLP 重试后仍超时或临时不可用，本次未完成实时检索。推荐仅从本次扫描开始前已有的缓存候选中筛选，不代表今日新论文；仍执行研究方向、主会资格和已投递去重检查。**", ""]
     if quality_summary:
         lines += [f"准入统计：{json.dumps(quality_summary, ensure_ascii=False)}", ""]
     if failed_sources:
         missing = "、".join(f"{source['venue']} {source['year']}" for source in failed_sources)
-        lines += [f"数据源提示：{missing} 本次抓取失败，推荐结果不包含这些来源。", ""]
+        detail = "本次抓取失败；这些来源仅可能使用此前缓存记录。" if cached_discovery else "本次抓取失败，推荐结果不包含这些来源。"
+        lines += [f"数据源提示：{missing} {detail}", ""]
     if not papers:
         lines += ["本次没有未投递且达到研究方向与信息完整度要求的论文；不会用弱相关论文补足数量。", ""]
     for i, p in enumerate(papers, 1):
@@ -1268,17 +1278,29 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     print(f"      Dedup history: {len(seen)} previously delivered paper IDs in {seen_path}")
     zotero_identities = build_zotero_identity_index(zotero_identity_papers)
     probe = max(years) + 1 if config.get("year_policy", {}).get("mode") == "rolling" and config.get("year_policy", {}).get("probe_next_year", True) else None
-    source_stats, failed_sources = ({"mode": "snapshot"}, []) if args.evaluate_only else discovery.discover(
-        store, {key: venue_by_key[key] for key in requested}, years, dblp_config, user_agent, fetch_dblp_page, probe_year=probe)
+    available_years = years + ([probe] if probe else [])
+    allow_cached = (dblp_config.get("allow_cached_on_transient_failure", False)
+                    and dblp_config.get("failure_policy") != "strict" and not args.discover_only and not args.evaluate_only)
+    cached_candidates = store.candidates(requested, available_years) if allow_cached else []
+    cached_discovery = False
+    try:
+        source_stats, failed_sources = ({"mode": "snapshot"}, []) if args.evaluate_only else discovery.discover(
+            store, {key: venue_by_key[key] for key in requested}, years, dblp_config, user_agent, fetch_dblp_page, probe_year=probe)
+    except discovery.DiscoveryUnavailableError as exc:
+        if not allow_cached or not exc.failures or not all(failure.get("transient") for failure in exc.failures):
+            raise
+        cached_discovery = True
+        failed_sources = exc.failures
+        source_stats = {**exc.stats, "mode": "cached_snapshot", "reason": str(exc), "cached_candidates": len(cached_candidates)}
+        print(f"warning: DBLP temporarily unavailable; using {len(cached_candidates)} pre-scan cached candidates; live discovery incomplete")
     if args.discover_only:
         store.finish_run(run_id, "discovery_complete")
         atomic_write_text(args.output, json.dumps(source_stats, indent=2) + "\n")
         print("discovery:", json.dumps(source_stats))
         return 0
-    available_years = years + ([probe] if probe else [])
-    candidate_values = [paper for paper in store.candidates(requested, available_years)
+    candidate_values = [paper for paper in (cached_candidates if cached_discovery else store.candidates(requested, available_years))
                         if paper["id"] not in seen and not filter_one_zotero_existing(paper, zotero_identities)]
-    failed_partitions = [(failure["venue_key"], failure["year"]) for failure in failed_sources]
+    failed_partitions = [] if cached_discovery else [(failure["venue_key"], failure["year"]) for failure in failed_sources]
     candidate_values = [paper for paper in candidate_values if not any(
         paper["year"] == year and paper["id"].startswith(("conf/" if venue_by_key[key]["type"] == "conference" else "journals/") + key + "/")
         for key, year in failed_partitions)]
@@ -1289,7 +1311,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     all_candidates = candidate_values
     qualification_stats = {}
     if config.get("main_conference", {}).get("enabled", True):
-        if not args.evaluate_only:
+        if not args.evaluate_only and not cached_discovery:
             qualification_stats["backfill"] = proceedings.backfill(
                 candidate_values, store, config.get("main_conference", {}),
                 lambda ids: lookup_dblp_proceedings(ids, user_agent, dblp_config))
@@ -1356,7 +1378,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     shadow_selected = selection.select(copy.deepcopy(ranked), int(config.get("max_results", 10)),
                                        {**config, "relation_policy": {**config.get("relation_policy", {}), "mode": "production"}},
                                        thresholds, semantic_production=semantic_production)
-    diagnostics = {"discovery": source_stats, "qualification": qualification_stats, "metadata": metadata_stats, "semantic": semantic_stats,
+    diagnostics = {"discovery": source_stats, "source_failures": failed_sources, "qualification": qualification_stats, "metadata": metadata_stats, "semantic": semantic_stats,
                    "relations": relation_stats, "relation_policy_selected_ids": [p["id"] for p in shadow_selected],
                    "qualification_deferred": [{key: p.get(key) for key in ("id", "title", *proceedings.FIELDS, "selection_reason")} for p in all_candidates if p.get("main_conference_status") != "verified"],
                    "selected_ids": [paper["id"] for paper in selected],
@@ -1381,7 +1403,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
         print(f"      LLM translation: {translated_count} API successes, {translation_cache_hits} cache hits")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report = render_report(selected, len(interests), len(candidates), failed_sources,
-                           {"主会资格": qualification_stats, "关系策略": relation_stats})
+                           {"主会资格": qualification_stats, "关系策略": relation_stats}, cached_discovery=cached_discovery)
     atomic_write_text(args.output, report)
     store.record_selection(run_id, selected)
     delivery_config = config.get("delivery", {}).get("smtp", {})
