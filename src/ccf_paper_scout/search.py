@@ -59,13 +59,13 @@ def settings(config, query, enabled=None, years=None):
     return result
 
 
-def cached_results(store, query, years, scope, limit, *, counts=None):
+def cached_results(store, query, years, scope, limit, *, counts=None, require_abstract=False):
     import paper_scout
     if scope not in SCOPES or type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError('invalid publication_scope or limit (1..100)')
     registry = proceedings.registry()
     candidates = []
-    stats = dict(cached=0, year_or_identity_filtered=0, publication_filtered=0, zero_match=0)
+    stats = dict(cached=0, year_or_identity_filtered=0, publication_filtered=0, abstract_filtered=0, zero_match=0)
     for paper in store.search_candidates(limit=100000):
         stats['cached'] += 1
         if paper.get('year') not in years or paper.get('identity_review_pending'):
@@ -80,11 +80,15 @@ def cached_results(store, query, years, scope, limit, *, counts=None):
         if scope == 'published' and publication not in ('published', 'verified_main'):
             stats['publication_filtered'] += 1
             continue
+        if require_abstract and not paper['abstract']:
+            stats['abstract_filtered'] += 1
+            continue
         paper['publication_label'] = publication
         candidates.append(paper)
     ranked = paper_scout.rank_candidates([], candidates, [query])
     stats.update(zero_match=sum(p['lexical_score'] <= 0 for p in ranked), matched=sum(p['lexical_score'] > 0 for p in ranked))
     stats['displayed'] = min(limit, stats['matched'])
+    stats['displayed_with_abstract'] = sum(bool(p.get('abstract')) for p in [p for p in ranked if p['lexical_score'] > 0][:limit])
     if counts is not None:
         counts.update(stats)
     feedback = {r[0]: json.loads(r[1]) for r in store.connection.execute('SELECT paper_id,payload_json FROM paper_feedback')}
@@ -94,12 +98,14 @@ def cached_results(store, query, years, scope, limit, *, counts=None):
 
 
 def run(config, path, query, *, enabled=None, years=None, scope='all_with_preprints', limit=20,
-        cached_only=False, cancel=None, update=None, search_id=None, split='dev'):
+        cached_only=False, cancel=None, update=None, search_id=None, split='dev', require_abstract=False):
     configured = settings(config, query, enabled, years)
     if scope not in SCOPES or type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError('invalid publication scope or limit')
+    if type(require_abstract) is not bool:
+        raise ValueError('require_abstract must be a boolean')
     request = dict(query=query.strip(), sources=configured['sources']['enabled'], years=configured['years'],
-                   publication_scope=scope, limit=limit, cached_only=cached_only, split=split)
+                   publication_scope=scope, limit=limit, cached_only=cached_only, split=split, require_abstract=require_abstract)
     store = StateStore(path)
     identifier = search_id or uuid.uuid4().hex
     result = None
@@ -109,7 +115,7 @@ def run(config, path, query, *, enabled=None, years=None, scope='all_with_prepri
         result = search_history.get(store, identifier)
         counts = {}
         result.update(state='cached', ranking='lexical', ranking_version='lexical-v1',
-            results=cached_results(store, query, configured['years'], scope, limit, counts=counts), counts=counts,
+            results=cached_results(store, query, configured['years'], scope, limit, counts=counts, require_abstract=require_abstract), counts=counts,
             discovery={'mode': 'cached_only', 'providers': {}})
         result['timing'] = {'cache_seconds': round(time.monotonic()-started, 3)}
         search_history.save(store, result)
@@ -120,13 +126,13 @@ def run(config, path, query, *, enabled=None, years=None, scope='all_with_prepri
             venues = [v for v in venues['venues'] if v['dblp_key'] in config.get('venue_keys', [])]
             def progress(status):
                 result.update(state='searching', discovery=status,
-                    results=cached_results(store, query, configured['years'], scope, limit, counts=counts))
+                    results=cached_results(store, query, configured['years'], scope, limit, counts=counts, require_abstract=require_abstract))
                 search_history.save(store, result)
                 if update:
                     update(result)
             result['discovery'] = sources.discover(store, configured, venues, configured['years'],
                 identifier, cancel=cancel, progress=progress)
-            result['results'] = cached_results(store, query, configured['years'], scope, limit, counts=counts)
+            result['results'] = cached_results(store, query, configured['years'], scope, limit, counts=counts, require_abstract=require_abstract)
         result['state'] = 'cancelled' if cancel and cancel.is_set() else 'complete'
         result['timing']['total_seconds'] = round(time.monotonic()-started, 3)
         search_history.save(store, result)

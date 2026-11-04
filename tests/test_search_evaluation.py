@@ -20,7 +20,8 @@ class HistoryTests(unittest.TestCase):
         self.path = self.root/'search.sqlite3'
         self.config = dict(years=[2025], venue_keys=['icml'])
         self.store = StateStore(self.path)
-        papers = [dict(source_record_id=str(i), title=title, year=2025, abstract='',
+        papers = [dict(source_record_id=str(i), title=title, year=2025,
+            abstract='We study world models for planning and reinforcement learning, using learned dynamics to improve sequential decisions.',
             url='https://example.org/'+str(i)) for i, title in enumerate(
                 ['World model planning', 'World model reinforcement learning', 'World model reasoning'])]
         self.store.save_source_page('openalex', dict(task_key='seed', records=papers, state={}))
@@ -104,6 +105,15 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(self.store.connection.execute('SELECT COUNT(*) FROM query_feedback').fetchone()[0], 0)
         packet['labels'][-1]['snapshot_hash'] = result['snapshot_hash']
         self.assertEqual(evaluation.import_ai(self.store, packet), 3)
+
+    def test_ai_packet_defers_unlabeled_papers_without_abstracts(self):
+        paper = self.store.search_candidates()[0]
+        paper['abstract'] = ''
+        self.store.update_candidates([paper])
+        self.run_search()
+        packet = evaluation.ai_packet(evaluation.export(self.store))
+        self.assertEqual(packet['deferred_missing_abstract'], 1)
+        self.assertEqual(len(packet['labels']), 2)
 
     def test_label_requires_result_membership_and_valid_grade(self):
         result = self.run_search()

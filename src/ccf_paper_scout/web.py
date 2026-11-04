@@ -47,7 +47,7 @@ class SearchServer(ThreadingHTTPServer):
                     result = search.run(self.config, self.database, arguments['query'], enabled=arguments.get('sources'),
                         years=arguments.get('years'), scope=arguments.get('publication_scope', 'all_with_preprints'),
                         cancel=self.cancel, update=update, search_id=identifier, split=arguments.get('split', 'dev'),
-                        cached_only=arguments.get('cached_only', False))
+                        cached_only=arguments.get('cached_only', False), require_abstract=arguments.get('require_abstract', False))
                     update(result)
                 except Exception as exc:
                     # Do not expose tracebacks or credential-bearing provider URLs in the UI.
@@ -134,7 +134,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(arguments, dict):
                 raise ValueError('JSON object required')
             if self.path == '/searches':
-                if type(arguments.get('cached_only', False)) is not bool or arguments.get('split', 'dev') not in ('dev', 'test'):
+                if (type(arguments.get('cached_only', False)) is not bool or type(arguments.get('require_abstract', False)) is not bool
+                        or arguments.get('split', 'dev') not in ('dev', 'test')):
                     raise ValueError('invalid search options')
                 identifier = self.server.start_search(arguments)
                 self.respond(202 if identifier else 409, {'id': identifier} if identifier else {'error': 'search_in_progress'})

@@ -56,6 +56,21 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(store.delivered_ids(), set())
         store.close()
 
+    def test_abstract_filter_is_explicit_and_part_of_frozen_request(self):
+        original = search.run(self.config, self.path, 'world model', cached_only=True)
+        filtered = search.run(self.config, self.path, 'world model', cached_only=True, require_abstract=True)
+        self.assertEqual(len(original['results']), 2)
+        self.assertEqual(len(filtered['results']), 1)
+        self.assertTrue(filtered['request']['require_abstract'])
+        self.assertEqual(filtered['counts']['abstract_filtered'], 1)
+        self.assertEqual(filtered['counts']['displayed_with_abstract'], 1)
+        from ccf_paper_scout import search_history
+        store = StateStore(self.path)
+        restored = search_history.get(store, original['id'])
+        store.close()
+        self.assertEqual(len(restored['results']), 2)
+        self.assertFalse(restored['request']['require_abstract'])
+
     def test_daily_snapshot_is_separate_including_when_daily_uses_wal(self):
         daily = StateStore(self.root/'daily.sqlite3')
         daily.save_source_page('pmlr', dict(task_key='seed', records=[public_paper()], state={}))

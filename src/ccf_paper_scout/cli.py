@@ -99,6 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument('--scope', choices=('verified_main', 'published', 'all_with_preprints'), default='all_with_preprints')
     search_parser.add_argument('--limit', type=int, default=20)
     search_parser.add_argument('--cached-only', action='store_true')
+    search_parser.add_argument('--require-abstract', action='store_true', help='exclude records without a usable abstract')
     search_parser.add_argument('--output', type=Path)
     search_parser.add_argument('--split', choices=('dev', 'test'), default='dev')
     history_parser = sub.add_parser('search-history')
@@ -145,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(args.config)
         result = search.run(config, search.database(config, args.config), args.query, enabled=args.sources,
             years=args.years, scope=args.scope, limit=args.limit, cached_only=args.cached_only,
-            update=lambda value: print(json.dumps(value, ensure_ascii=False)), split=args.split)
+            update=lambda value: print(json.dumps(value, ensure_ascii=False)), split=args.split, require_abstract=args.require_abstract)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

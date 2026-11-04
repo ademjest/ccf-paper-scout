@@ -58,7 +58,7 @@ def validate(dataset):
 
 def ai_packet(dataset):
     validate(dataset)
-    examples, tasks = [], []
+    examples, tasks, deferred = [], [], 0
     for query in dataset['queries']:
         if query['split'] != 'dev':
             continue
@@ -69,14 +69,17 @@ def ai_packet(dataset):
             if labels.get('human', {}).get('grade') is not None:
                 examples.append(dict(item, **{k: labels['human'][k] for k in ('grade', 'reason')}))
             elif 'human' not in labels and 'ai' not in labels:
-                tasks.append(dict(item, grade=None, reason='', actor=''))
+                if item['abstract']:
+                    tasks.append(dict(item, grade=None, reason='', actor=''))
+                else:
+                    deferred += 1
     tasks.sort(key=lambda item: history.digest([item['search_id'], item['paper_id']]))
     return dict(schema='scout-ai-labels-v1', instructions=(
         'Use human development examples as guidance. Grade relevance to the specific query: '
         '2=directly useful, 1=partly useful, 0=irrelevant. Leave null when evidence is insufficient. '
         'Explain with title/abstract evidence and identify the annotator/model. Do not infer from ranking. '
         'No held-out queries or labels are included. Import always records these as AI suggestions.'),
-        examples=examples, labels=tasks)
+        examples=examples, labels=tasks, deferred_missing_abstract=deferred)
 
 
 def import_ai(store, packet):
