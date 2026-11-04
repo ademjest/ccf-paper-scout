@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [{name = "ademjest"}]
-dependencies = ["tzdata>=2025.1; sys_platform == 'win32'"]
+dependencies = ["requests>=2.32,<3", "tzdata>=2025.1; sys_platform == 'win32'"]
 
 [project.optional-dependencies]
 semantic = ["sentence-transformers==3.4.1", "numpy>=1.26,<3"]
@@ -24,4 +24,4 @@ py-modules = ["paper_scout", "state_store"]
 package-dir = {"ccf_paper_scout" = "src/ccf_paper_scout"}
 
 [tool.setuptools.package-data]
-ccf_paper_scout = ["data/*.json"]
+ccf_paper_scout = ["data/*.json", "data/*.html"]

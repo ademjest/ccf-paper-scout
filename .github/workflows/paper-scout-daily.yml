@@ -74,6 +74,8 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.SEMANTIC_SCHOLAR_API_KEY }}
+          CROSSREF_MAILTO: ${{ vars.CROSSREF_MAILTO }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
           PAPER_SCOUT_DELIVERY_GATE: .runtime-state/state/.delivery-approved
           PAPER_SCOUT_SCHEDULED_RUN: ${{ github.event_name == 'schedule' && 'true' || 'false' }}

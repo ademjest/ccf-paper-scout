@@ -34,6 +34,11 @@ def is_bibliographic_placeholder(text: str) -> bool:
     return len(text) < 800 and bool(re.search(r"\.\s*Proceedings of .+\.\s*\d{4}\.?\s*$", text, re.I))
 
 
+def usable_abstract(text: str) -> str:
+    text = ' '.join((text or '').split())
+    return text if len(text) >= 80 and not is_bibliographic_placeholder(text) else ''
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -102,7 +107,7 @@ class PaperHTML(HTMLParser):
             self.heading.append(data)
 
 
-def parse_abstract(document: str, paper: dict) -> str:
+def parse_abstract(document: str, paper: dict, *, allow_missing: bool = False) -> str:
     parsed = PaperHTML()
     parsed.feed(document)
     titles = parsed.meta.get("citation_title", [])
@@ -112,6 +117,6 @@ def parse_abstract(document: str, paper: dict) -> str:
     if not authors.intersection(author_key(a) for a in paper.get("authors", [])):
         raise ValueError("official_author_mismatch")
     abstract = " ".join("".join(parsed.abstract).split())
-    if len(abstract) < 80:
+    if len(abstract) < 80 and not allow_missing:
         raise ValueError("official_abstract_missing")
-    return abstract
+    return usable_abstract(abstract)

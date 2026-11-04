@@ -1,12 +1,12 @@
 # CCF Paper Scout
 
-CCF Paper Scout 是一个面向个人研究者的自动论文推荐程序。它从 Zotero 构建兴趣画像，从 DBLP 获取指定 CCF-A venue 的正式论文记录，使用本地算法完成过滤、去重和排序，可选调用 OpenAI-compatible API 生成中文论文卡片，并通过 GitHub Actions 和 SMTP 每日发送邮件。
+CCF Paper Scout 是一个面向个人研究者的自动论文推荐程序。它从 Zotero 构建兴趣画像，通过 DBLP、官方论文目录和 OpenAlex 获取论文候选及摘要，使用本地算法完成过滤、去重和排序，可选调用 OpenAI-compatible API 生成中文论文卡片，并通过 GitHub Actions 和 SMTP 每日发送邮件。
 
 当前默认偏好：
 
 - 主要方向：强化学习（RL）、多智能体强化学习（MARL）、LLM-assisted RL；
 - 拓展方向：LLM Agent；
-- 每次最多推荐 10 篇，其中纯 LLM Agent 拓展论文最多 1 篇。
+- 默认每次最多推荐 5 篇，其中纯 LLM Agent 拓展论文最多 1 篇。
 
 ## 工作流程
 
@@ -14,14 +14,14 @@ CCF Paper Scout 是一个面向个人研究者的自动论文推荐程序。它�
 GitHub Actions
   → 恢复私有状态
   → 读取 Zotero 兴趣文献
-  → 按动态年份、全局预算和持久游标扫描 DBLP（默认官方 SPARQL）
+  → 按动态年份、独立来源预算和持久游标采集 DBLP／PMLR／OpenAlex
   → 保存完整候选库并周期复查；发现进度不依赖是否已推送
   → CCF-A 白名单与具体 proceedings／官方轨道证据硬过滤（未知暂缓）
   → 排除已推送论文和 Zotero 已收藏论文
-  → 有预算、负缓存和正文哈希的 OpenAlex 摘要补全
+  → 在来源预算内完成官方页面／DOI 精确摘要补全
   → 归一化词项排序，可选 CPU embedding / 相关性复核
   → LLM／RL 作用方向原型与独立证据复核（默认 shadow，正式模式强制准入）
-  → 质量门槛与新发现/历史队列，最多 10 篇，不用其他方向补位
+  → 质量门槛与新发现/历史队列，最多 5 篇，不用其他方向补位
   → LLM 生成中文论文卡片（可选）
   → SMTP 投递
   → 持久化 SQLite 和去重状态
@@ -32,6 +32,19 @@ LLM 不参与 CCF-A 出版资格判断和去重。关系复核与最终中文卡
 主会与 LLM／RL 关系升级的范围、保守暂缓边界及 Actions 测试步骤见 [实施与审查说明](docs/main-conference-and-relations-implementation.md)。
 
 `update-paper` 的实施内容、迁移方法、测试结果和 Actions 启用步骤见 [部署说明](docs/update-paper-implementation.md)。原始设计见 [优化方案](docs/recommendation-quality-and-discovery-plan.md)。
+
+## 手动论文搜索
+
+可使用不依赖 Zotero、SMTP 或 LLM 的本地搜索：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --no-cache-dir .
+.\.venv\Scripts\ccf-paper-scout.exe serve --config config.example.json
+```
+
+浏览器打开 `http://127.0.0.1:8765`，输入问题、选择来源与发表范围；支持取消、收藏、已读和相关性反馈。默认搜索 OpenAlex 与 arXiv，反馈不影响邮件已投递历史。命令行可用 `ccf-paper-scout search --query "world model planning" --years 2025 2026`。
+
+来源状态、Windows 命令、预算配置、真实测试结果及上线限制见 [多来源实施说明](docs/multi-source-implementation.md)。完整设计见 [升级方案](docs/multi-source-upgrade-plan.md)。
 
 ## 环境要求
 

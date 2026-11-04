@@ -22,6 +22,19 @@
     "sparql_fallback": true
   },
   "max_results": 5,
+  "sources": {
+    "enabled": ["dblp", "pmlr", "openalex"],
+    "mode": "production",
+    "max_parallel_sources": 2,
+    "collection_deadline_seconds": 420,
+    "providers": {
+      "dblp": {"max_requests": 12, "deadline_seconds": 120},
+      "pmlr": {"max_requests": 26, "deadline_seconds": 90, "papers_per_volume": 24},
+      "openalex": {"max_requests": 4, "deadline_seconds": 60, "page_size": 25}
+    }
+  },
+  "discovery_queries": ["reinforcement learning planning policy", "world model model-based reinforcement learning",
+    "self-play imitation learning policy", "language model reward design reinforcement learning"],
   "main_conference": {
     "enabled": true,
     "max_backfill_papers_per_run": 1000

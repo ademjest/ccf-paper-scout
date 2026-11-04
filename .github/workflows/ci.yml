@@ -9,11 +9,15 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ['3.11', '3.12', '3.13']
+        include:
+          - os: windows-latest
+            python-version: '3.12'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,7 +28,7 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - name: Verify installed package outside checkout
         working-directory: ${{ runner.temp }}
-        run: python -c 'import paper_scout; from ccf_paper_scout import discovery, metadata, selection, semantic, proceedings, relations; assert proceedings.registry()["volumes"]'
+        run: python -c 'import paper_scout; from ccf_paper_scout import discovery, metadata, selection, semantic, proceedings, relations, sources, search, web; assert proceedings.registry()["volumes"]'
   semantic-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25

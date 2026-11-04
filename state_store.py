@@ -54,6 +54,30 @@ CREATE TABLE IF NOT EXISTS paper_embeddings(
 CREATE TABLE IF NOT EXISTS relevance_cache(
   cache_key TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS paper_aliases(
+  namespace TEXT NOT NULL, external_id TEXT NOT NULL, paper_id TEXT NOT NULL REFERENCES papers(paper_id),
+  PRIMARY KEY(namespace,external_id,paper_id)
+);
+CREATE TABLE IF NOT EXISTS paper_titles(
+  title_key TEXT NOT NULL, paper_id TEXT NOT NULL REFERENCES papers(paper_id), PRIMARY KEY(title_key,paper_id)
+);
+CREATE TABLE IF NOT EXISTS source_records(
+  source TEXT NOT NULL, record_id TEXT NOT NULL, paper_id TEXT NOT NULL, payload_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL, PRIMARY KEY(source,record_id)
+);
+CREATE TABLE IF NOT EXISTS source_tasks(
+  task_key TEXT PRIMARY KEY, source TEXT NOT NULL, state_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS source_health(
+  source TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS source_runs(
+  run_id TEXT NOT NULL, source TEXT NOT NULL, payload_json TEXT NOT NULL,
+  PRIMARY KEY(run_id,source)
+);
+CREATE TABLE IF NOT EXISTS paper_feedback(
+  paper_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 """
 
 
@@ -80,9 +104,109 @@ class StateStore:
         self.connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (3, ?)", (now(),))
         self.connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (1, ?)", (now(),))
         self.connection.commit()
+        if not self.connection.execute('SELECT 1 FROM schema_migrations WHERE version=4').fetchone():
+            from ccf_paper_scout.identity import aliases
+            with self.connection:
+                for row in self.connection.execute('SELECT paper_id,title,doi FROM papers').fetchall():
+                    self._ensure_identity(dict(id=row[0], title=row[1], doi=row[2]))
+                    self._save_aliases(row[0], aliases(dict(id=row[0], title=row[1], doi=row[2])))
+                for row in self.connection.execute('SELECT payload_json FROM candidate_papers').fetchall():
+                    paper = json.loads(row[0])
+                    self._ensure_identity(paper)
+                    self._save_aliases(paper['id'], aliases(paper))
+                self.connection.execute('INSERT INTO schema_migrations VALUES (4,?)', (now(),))
 
     def close(self) -> None:
         self.connection.close()
+
+    def _ensure_identity(self, paper: dict) -> None:
+        from ccf_paper_scout.identity import title
+        self.connection.execute('INSERT OR IGNORE INTO papers VALUES (?,?,?,?)',
+                                (paper['id'], paper.get('title', ''), paper.get('doi', ''), now()))
+        if title(paper.get('title', '')):
+            self.connection.execute('INSERT OR IGNORE INTO paper_titles VALUES (?,?)', (title(paper['title']), paper['id']))
+
+    def _save_aliases(self, paper_id: str, aliases) -> None:
+        self.connection.executemany('INSERT OR IGNORE INTO paper_aliases VALUES (?,?,?)',
+                                    [(kind, value, paper_id) for kind, value in aliases])
+
+    def source_states(self, source: str) -> dict:
+        return {r[0]: json.loads(r[1]) for r in self.connection.execute(
+            'SELECT task_key,state_json FROM source_tasks WHERE source=?', (source,))}
+
+    def source_health(self, source: str) -> dict:
+        row = self.connection.execute('SELECT payload_json FROM source_health WHERE source=?', (source,)).fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def save_source_health(self, source: str, run_id: str, status: dict) -> None:
+        with self.connection:
+            self.connection.execute('INSERT OR REPLACE INTO source_health VALUES (?,?,?)', (source, json.dumps(status), now()))
+            self.connection.execute('INSERT OR REPLACE INTO source_runs VALUES (?,?,?)', (run_id, source, json.dumps(status)))
+
+    def save_source_page(self, source: str, page: dict) -> list[str]:
+        """Identity, provenance, candidates and page checkpoint commit together."""
+        from ccf_paper_scout import identity, official_abstracts
+        saved = []
+        with self.connection:
+            for record in page['records']:
+                paper = dict(record, source=source)
+                paper['abstract'] = official_abstracts.usable_abstract(paper.get('abstract', ''))
+                external = identity.aliases(paper)
+                matches = set()
+                for kind, value in external:
+                    matches.update(r[0] for r in self.connection.execute(
+                        'SELECT paper_id FROM paper_aliases WHERE namespace=? AND external_id=?', (kind, value)))
+                source_id = str(paper['source_record_id'])
+                identifier = source_id if source == 'dblp' else 'paper:' + str(uuid.uuid5(uuid.NAMESPACE_URL, source + ':' + source_id))
+                conflict = len(matches) > 1
+                if len(matches) == 1:
+                    identifier = next(iter(matches))
+                paper['id'] = identifier
+                row = self.connection.execute('SELECT payload_json FROM candidate_papers WHERE paper_id=?', (identifier,)).fetchone()
+                old = json.loads(row[0]) if row else {}
+                if old.get('doi') and paper.get('doi') and identity.doi(old['doi']) != identity.doi(paper['doi']):
+                    conflict = True
+                # A weak match is a review candidate, never permission to resend under a new ID.
+                if not matches:
+                    conflict = bool(self.connection.execute('SELECT 1 FROM paper_titles WHERE title_key=? AND paper_id<>? LIMIT 1',
+                        (identity.title(paper.get('title')), identifier)).fetchone())
+                paper['identity_review_pending'] = conflict
+                self._ensure_identity(paper)
+                self.connection.execute('INSERT OR REPLACE INTO source_records VALUES (?,?,?,?,?)',
+                                        (source, source_id, identifier, json.dumps(paper, ensure_ascii=False), now()))
+                if conflict:
+                    continue
+                self._save_aliases(identifier, external)
+                merged = {**old, **{k: v for k, v in paper.items() if v not in (None, '', [])}}
+                merged['found_in'] = sorted(set(old.get('found_in', [])) | {source})
+                evidence = {json.dumps(e, sort_keys=True): e for e in old.get('publication_evidence', []) + paper.get('publication_evidence', [])}
+                merged['publication_evidence'] = list(evidence.values())
+                if (old.get('publication_evidence') or old.get('proceedings_id')) and not paper.get('publication_evidence'):
+                    for key in ('venue_key', 'venue', 'year', 'proceedings_id', 'rank', 'type', 'url', 'ee', 'publication_status'):
+                        if key in old:
+                            merged[key] = old[key]
+                if official_abstracts.usable_abstract(old.get('abstract', '')) and not paper.get('publication_evidence'):
+                    merged['abstract'] = old['abstract']
+                    for key in ('abstract_source', 'abstract_source_url'):
+                        if key in old:
+                            merged[key] = old[key]
+                merged['abstract'] = official_abstracts.usable_abstract(merged.get('abstract', ''))
+                venue, year = merged.get('venue_key', ''), int(merged.get('year') or 0)
+                self._upsert_candidate(venue, year, merged, bool(page.get('historical', True)))
+                self.connection.execute('UPDATE candidate_papers SET venue_key=?,year=?,payload_json=?,text_hash=? WHERE paper_id=?',
+                    (venue, year, json.dumps(merged, ensure_ascii=False), text_hash(merged), identifier))
+                saved.append(identifier)
+            self.connection.execute('INSERT OR REPLACE INTO source_tasks VALUES (?,?,?,?)',
+                                    (page['task_key'], source, json.dumps(page['state']), now()))
+        return saved
+
+    def search_candidates(self, limit: int = 5000) -> list[dict]:
+        rows = self.connection.execute('SELECT payload_json FROM candidate_papers ORDER BY updated_at DESC LIMIT ?', (limit,))
+        return [json.loads(row[0]) for row in rows]
+
+    def save_feedback(self, paper_id: str, feedback: dict) -> None:
+        with self.connection:
+            self.connection.execute('INSERT OR REPLACE INTO paper_feedback VALUES (?,?,?)', (paper_id, json.dumps(feedback), now()))
 
     def start_run(self, config_hash: str) -> str:
         run_id = uuid.uuid4().hex
@@ -208,6 +332,9 @@ class StateStore:
             "payload_json=excluded.payload_json,text_hash=excluded.text_hash,updated_at=excluded.updated_at",
             (paper["id"], venue_key, year, json.dumps(payload, ensure_ascii=False), text_hash(payload), now(), now(), int(historical)),
         )
+        from ccf_paper_scout.identity import aliases
+        self._ensure_identity(paper)
+        self._save_aliases(paper['id'], aliases(paper))
         return int(row is None)
 
     def candidates(self, venue_keys: list[str], years: list[int]) -> list[dict[str, Any]]:
@@ -291,6 +418,8 @@ class StateStore:
             )
             for rank, paper_id in enumerate(seen.get("ids", []), 1):
                 self.connection.execute("INSERT OR IGNORE INTO papers VALUES (?,?,?,?)", (paper_id, "", "", now()))
+                from ccf_paper_scout.identity import aliases
+                self._save_aliases(paper_id, aliases({'id': paper_id}))
                 self.connection.execute(
                     "INSERT OR IGNORE INTO recommendation_items VALUES (?,?,?,?,?)", (run_id, paper_id, rank, 0, "delivered")
                 )

@@ -1,0 +1,10 @@
+{
+  "version": "official-directories-v1",
+  "volumes": [
+    {"source":"pmlr","venue":"icml","year":2025,"url":"https://proceedings.mlr.press/v267/","path_pattern":"/v267/[\\w-]+\\.html","track":"main_research","proceedings_id":"https://dblp.org/rec/conf/icml/2025"},
+    {"source":"neurips","venue":"nips","year":2025,"url":"https://proceedings.neurips.cc/paper_files/paper/2025/vol38-main-conference","path_pattern":"/paper_files/paper/2025/hash/[a-f0-9]+-Abstract-Conference\\.html","entry_track":"conference","track":"main_research","proceedings_id":"https://dblp.org/rec/conf/nips/2025"},
+    {"source":"acl","venue":"acl","year":2025,"url":"https://aclanthology.org/volumes/2025.acl-long/","path_pattern":"/2025\\.acl-long\\.\\d+/","track":"main_research","proceedings_id":"https://dblp.org/rec/conf/acl/2025-1"},
+    {"source":"acl","venue":"acl","year":2025,"url":"https://aclanthology.org/volumes/2025.acl-short/","path_pattern":"/2025\\.acl-short\\.\\d+/","track":"main_research","proceedings_id":"https://dblp.org/rec/conf/acl/2025-2"},
+    {"source":"cvf","venue":"cvpr","year":2025,"url":"https://openaccess.thecvf.com/CVPR2025?day=all","path_pattern":"/content/CVPR2025/html/[^/]+_paper\\.html","track":"main_research","proceedings_id":"https://dblp.org/rec/conf/cvpr/2025"}
+  ]
+}

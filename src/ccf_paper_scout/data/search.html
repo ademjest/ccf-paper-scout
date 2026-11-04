@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Paper Scout · 论文搜索</title>
+<style>
+body{font:16px/1.7 system-ui,sans-serif;background:#f4f6fa;color:#17233b;margin:0}main{max-width:1000px;margin:40px auto;padding:0 24px}h1{margin-bottom:4px}p{margin-top:4px}.muted{color:#52627a;font-size:14px}form,article{background:white;border:1px solid #dce3ef;border-radius:12px;padding:22px;margin:20px 0}input,select,button{font:inherit;padding:9px;border:1px solid #bfcadd;border-radius:6px}input[type=text]{box-sizing:border-box;width:100%;margin-bottom:12px}button{cursor:pointer;background:#264b90;color:white}button:disabled{opacity:.5;cursor:default}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}fieldset{margin:12px 0;border:0;padding:0}fieldset label{margin-right:12px;white-space:nowrap}h2{font-size:20px}a{color:#264b90}article p{white-space:pre-wrap}.feedback{display:flex;gap:12px;align-items:center;flex-wrap:wrap}#status{white-space:pre-wrap}input[type=number]{width:90px}
+</style>
+<main>
+<h1>论文搜索</h1><p class="muted">先看本地结果，再补充公开来源。手动阅读、收藏与每日邮件历史分别保存。</p>
+<form id="form">
+<label for="query">研究问题或关键词（英文检索效果通常更好）</label>
+<input id="query" type="text" required maxlength="500" value="world model reinforcement learning">
+<div class="row"><label>起始年 <input id="from" type="number" min="1900" max="2100" value="2025"></label><label>结束年 <input id="to" type="number" min="1900" max="2100" value="2026"></label>
+<select id="scope" aria-label="发表范围"><option value="all_with_preprints">全部 · 含预印本与投稿</option><option value="verified_main">仅已核验主会</option><option value="published">正式发表（含主会）</option></select></div>
+<fieldset id="sources"><legend>检索来源</legend></fieldset>
+<div class="row"><button id="submit">搜索</button><button type="button" id="cancel" disabled>取消补充</button></div>
+</form>
+<p id="status" role="status" aria-live="polite">等待搜索。每次最多补充 60 秒；结果按题名与摘要的词项匹配排序。</p>
+<section id="results"></section>
+</main>
+<script nonce="__SCOUT_TOKEN__">
+const token='__SCOUT_TOKEN__', $=id=>document.getElementById(id);
+const labels={verified_main:'已核验主会',published:'正式发表 · 未核验主会',preprint:'预印本',submission:'投稿 · 未确认录用',unknown:'发表状态未核实'};
+const states={cancelled:'已取消',ok:'完成',empty:'无结果',partial:'预算内部分完成',timeout:'超时',unavailable:'暂不可用',rate_limited:'限流',blocked:'访问受阻',auth_required:'需要凭据',cooldown:'冷却中',not_configured:'未配置合格目录',protocol_error:'响应解析失败'};
+for(const name of ['openalex','arxiv','pmlr','neurips','acl','cvf','aaai','crossref','dblp']){
+ const label=document.createElement('label'), box=document.createElement('input');box.type='checkbox';box.value=name;box.checked=['openalex','arxiv'].includes(name);label.append(box,' '+name);$('sources').append(label);
+}
+async function api(path,method='GET',body){const response=await fetch(path,{method,headers:{'Content-Type':'application/json','X-Scout-Token':token},body:body===undefined?undefined:JSON.stringify(body)});const value=await response.json();if(!response.ok)throw Error(value.error||'请求失败');return value;}
+function text(parent,tag,value,className){const node=document.createElement(tag);node.textContent=value||'';if(className)node.className=className;parent.append(node);return node;}
+function render(items){$('results').replaceChildren();for(const p of items){const item=document.createElement('article');$('results').append(item);const h=text(item,'h2',p.title);try{const url=new URL(p.ee||p.url);if(['http:','https:'].includes(url.protocol)){h.textContent='';const link=text(h,'a',p.title);link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';}}catch{}
+ text(item,'div',`${p.year||'年份未知'} · ${labels[p.publication_label]||labels.unknown} · ${(p.found_in||[]).join(', ')}`,'muted');text(item,'p',p.abstract||'暂未取得摘要，请查看论文主页。');
+ const controls=document.createElement('div');controls.className='feedback';item.append(controls);const feedback=p.feedback||{}, relevance=document.createElement('select');for(const [v,l]of [['unsure','待判断'],['relevant','相关'],['irrelevant','不相关']]){const o=document.createElement('option');o.value=v;o.textContent=l;relevance.append(o);}relevance.value=feedback.relevance||'unsure';controls.append(relevance);
+ const notice=text(controls,'span','','muted');async function save(value){try{await api('/papers/'+encodeURIComponent(p.id)+'/feedback','POST',value);notice.textContent='已保存';}catch(e){notice.textContent='保存失败：'+e.message;}}
+ relevance.onchange=()=>save({relevance:relevance.value});for(const [name,label]of [['saved','收藏'],['read','已读']]){const wrapper=document.createElement('label'), box=document.createElement('input');box.type='checkbox';box.checked=!!feedback[name];box.onchange=()=>save({[name]:box.checked});wrapper.append(box,' '+label);controls.append(wrapper);}
+}}
+let active=null;
+$('form').onsubmit=async event=>{event.preventDefault();const from=Number($('from').value),to=Number($('to').value);if(to<from||to-from>9){$('status').textContent='请选择跨度不超过 10 年的有效年份。';return;}$('submit').disabled=true;
+ try{const job=await api('/searches','POST',{query:$('query').value,years:Array.from({length:to-from+1},(_,i)=>from+i),sources:[...$('sources').querySelectorAll('input:checked')].map(x=>x.value),publication_scope:$('scope').value});active=job.id;$('cancel').disabled=false;let previous='';while(active){const value=await api('/searches/'+active);const version=value.state+':'+value.results.length;if(version!==previous){render(value.results);previous=version;}const providers=Object.entries(value.discovery?.providers||{}).map(([s,r])=>s+'：'+(states[r.status]||r.status)).join('；');$('status').textContent=(['cached','searching'].includes(value.state)?'已展示本地结果，正在补充来源…':value.state==='complete'?'搜索完成':value.state==='cancelled'?'已取消补充，保留已取得的结果':value.state==='failed'?'搜索失败：'+value.error:'正在读取本地库…')+`\n${value.results.length} 篇 · 词项匹配排序`+(providers?'\n'+providers:'');if(['complete','cancelled','failed'].includes(value.state))break;await new Promise(resolve=>setTimeout(resolve,700));}}
+ catch(e){$('status').textContent='搜索失败：'+e.message;}finally{active=null;$('submit').disabled=false;$('cancel').disabled=true;}};
+$('cancel').onclick=async()=>{if(active){await api('/searches/'+active,'DELETE');$('cancel').disabled=true;}};
+</script>
+</html>
