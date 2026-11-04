@@ -20,7 +20,7 @@
     "max_attempts": 3,
     "sparql_fallback": true
   },
-  "max_results": 10,
+  "max_results": 5,
   "main_conference": {
     "enabled": true,
     "max_backfill_papers_per_run": 1000
