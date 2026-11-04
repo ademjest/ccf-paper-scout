@@ -46,6 +46,8 @@ LLM 不参与 CCF-A 出版资格判断和去重。关系复核与最终中文卡
 
 来源状态、Windows 命令、预算配置、真实测试结果及上线限制见 [多来源实施说明](docs/multi-source-implementation.md)。完整设计见 [升级方案](docs/multi-source-upgrade-plan.md)。
 
+网页现支持持久化搜索历史、针对查询的 0/1/2 分标注及 AI 协作任务导出。人工与 AI 标签分开保存，独立测试样本不进入 AI 待标注包；可对固定结果快照重跑评测。操作步骤与指标边界见 [搜索反馈与评测说明](docs/search-feedback-and-evaluation.md)。
+
 ## 环境要求
 
 - Python 3.11+

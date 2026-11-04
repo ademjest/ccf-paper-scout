@@ -10,7 +10,7 @@ import threading
 from urllib.parse import unquote
 
 from state_store import StateStore
-from . import search
+from . import search, search_history, search_evaluation
 
 
 class SearchServer(ThreadingHTTPServer):
@@ -46,12 +46,13 @@ class SearchServer(ThreadingHTTPServer):
                 try:
                     result = search.run(self.config, self.database, arguments['query'], enabled=arguments.get('sources'),
                         years=arguments.get('years'), scope=arguments.get('publication_scope', 'all_with_preprints'),
-                        cancel=self.cancel, update=update)
+                        cancel=self.cancel, update=update, search_id=identifier, split=arguments.get('split', 'dev'),
+                        cached_only=arguments.get('cached_only', False))
                     update(result)
                 except Exception as exc:
                     # Do not expose tracebacks or credential-bearing provider URLs in the UI.
                     with self.lock:
-                        self.job.update(state='failed', error=type(exc).__name__)
+                        self.job.update(state='failed', error=str(exc) if isinstance(exc, ValueError) else type(exc).__name__)
 
             self.worker = threading.Thread(target=execute, name='scout-search')
             self.worker.start()
@@ -99,13 +100,25 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/':
             html = files('ccf_paper_scout').joinpath('data/search.html').read_text(encoding='utf-8')
             self.respond(200, html.replace('__SCOUT_TOKEN__', self.server.token), 'text/html; charset=utf-8')
-        elif self.path.startswith('/searches/'):
-            with self.server.lock:
-                job = copy.deepcopy(self.server.job)
-            if job and self.path == '/searches/' + job['id']:
-                self.respond(200, job)
-            else:
-                self.respond(404, {'error': 'search_not_found'})
+        elif self.path in ('/searches', '/benchmark', '/annotation-tasks') or self.path.startswith('/searches/'):
+            store = StateStore(self.server.database)
+            try:
+                if self.path == '/searches':
+                    self.respond(200, search_history.recent(store))
+                elif self.path in ('/benchmark', '/annotation-tasks'):
+                    snapshot = search_evaluation.export(store)
+                    self.respond(200, search_evaluation.ai_packet(snapshot) if self.path == '/annotation-tasks' else snapshot)
+                else:
+                    identifier = self.path[len('/searches/'):]
+                    result = search_history.get(store, identifier)
+                    with self.server.lock:
+                        job = copy.deepcopy(self.server.job)
+                        live = bool(job and job['id'] == identifier and self.server.worker and self.server.worker.is_alive())
+                    if not result and job and job['id'] == identifier:
+                        result = job
+                    self.respond(200 if result else 404, dict(result, live=live) if result else {'error':'search_not_found'})
+            finally:
+                store.close()
         else:
             self.respond(404, {'error': 'not_found'})
 
@@ -121,14 +134,26 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(arguments, dict):
                 raise ValueError('JSON object required')
             if self.path == '/searches':
+                if type(arguments.get('cached_only', False)) is not bool or arguments.get('split', 'dev') not in ('dev', 'test'):
+                    raise ValueError('invalid search options')
                 identifier = self.server.start_search(arguments)
                 self.respond(202 if identifier else 409, {'id': identifier} if identifier else {'error': 'search_in_progress'})
+            elif self.path.startswith('/searches/') and self.path.endswith('/feedback'):
+                identifier = self.path[len('/searches/'):-len('/feedback')]
+                if set(arguments) - {'paper_id', 'grade', 'reason', 'snapshot_hash'} or 'grade' not in arguments:
+                    raise ValueError('invalid query judgment')
+                store = StateStore(self.server.database)
+                try:
+                    with store.connection:
+                        value = search_history.label(store, identifier, arguments.get('paper_id'), arguments['grade'],
+                            reason=arguments.get('reason', ''), snapshot_hash=arguments.get('snapshot_hash'))
+                    self.respond(200, value)
+                finally:
+                    store.close()
             elif self.path.startswith('/papers/') and self.path.endswith('/feedback'):
                 paper_id = unquote(self.path[len('/papers/'):-len('/feedback')])
-                if not arguments or set(arguments) - {'relevance', 'read', 'saved'}:
+                if not arguments or set(arguments) - {'read', 'saved'}:
                     raise ValueError('invalid feedback fields')
-                if 'relevance' in arguments and arguments['relevance'] not in ('relevant', 'irrelevant', 'unsure'):
-                    raise ValueError('invalid relevance')
                 if any(type(arguments[k]) is not bool for k in ('read', 'saved') if k in arguments):
                     raise ValueError('read and saved must be booleans')
                 store = StateStore(self.server.database)

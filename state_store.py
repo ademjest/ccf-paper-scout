@@ -78,6 +78,16 @@ CREATE TABLE IF NOT EXISTS source_runs(
 CREATE TABLE IF NOT EXISTS paper_feedback(
   paper_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS search_sessions(
+  search_id TEXT PRIMARY KEY, query_key TEXT NOT NULL, split TEXT NOT NULL,
+  started_at TEXT NOT NULL, state TEXT NOT NULL, payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS search_query_history ON search_sessions(query_key,started_at);
+CREATE TABLE IF NOT EXISTS query_feedback(
+  search_id TEXT NOT NULL REFERENCES search_sessions(search_id), paper_id TEXT NOT NULL,
+  origin TEXT NOT NULL, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY(search_id,paper_id,origin)
+);
 """
 
 

@@ -165,7 +165,7 @@ class WebTests(unittest.TestCase):
                     response = requests.post(url+'/searches',headers=headers,json={'query':'world model'},timeout=3)
                     self.assertEqual(response.status_code, 202)
                     job = response.json()['id']
-                    self.assertEqual(requests.post(url+'/searches',headers=headers,json={'query':'other'},timeout=3).status_code,409)
+                    self.assertEqual(requests.post(url+'/searches',headers=headers,json={'query':'planning'},timeout=3).status_code,409)
                     self.assertEqual(requests.delete(url+'/searches/'+job,headers=headers,timeout=3).status_code,202)
                     server.worker.join(timeout=4)
                     self.assertFalse(server.worker.is_alive())
