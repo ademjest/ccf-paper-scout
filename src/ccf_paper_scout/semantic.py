@@ -50,7 +50,8 @@ class Encoder:
                 from sentence_transformers import SentenceTransformer
             except ImportError as exc:
                 raise RuntimeError("install ccf-paper-scout[semantic] to enable embeddings") from exc
-            model = SentenceTransformer(name, revision=revision, device="cpu", trust_remote_code=False)
+            model = SentenceTransformer(name, revision=revision, device="cpu", trust_remote_code=False,
+                local_files_only=bool(config.get("local_files_only", False)), cache_folder=config.get("cache_folder"))
         self.model = model
 
     def encode_papers(self, papers: list[dict[str, Any]]) -> list[list[float]]:
@@ -62,7 +63,8 @@ class Encoder:
             title = " ".join(str(paper.get("title", "")).split())
             abstract = " ".join(str(paper.get("abstract", "")).split())
             title_ids = tokenizer.encode(title, add_special_tokens=False)[:min(96, limit // 3)]
-            abstract_ids = tokenizer.encode(abstract, add_special_tokens=False)
+            # This token list is split below, never passed to the model as one sequence.
+            abstract_ids = tokenizer.encode(abstract, add_special_tokens=False, verbose=False)
             available = limit - len(title_ids) - 8
             chunks = [abstract_ids[i:i + available] for i in range(0, len(abstract_ids), available)] or [[]]
             maximum = int(self.config.get("max_chunks_per_paper", 3))
@@ -85,7 +87,7 @@ class Encoder:
 
 
 def rank(papers: list[dict[str, Any]], interests: list[dict[str, Any]], config: dict[str, Any], store: Any,
-         *, encoder: Encoder | None = None) -> dict[str, Any]:
+         *, encoder: Encoder | None = None, cancel: Any = None) -> dict[str, Any]:
     settings = config.get("semantic", {})
     encoder = encoder or Encoder(settings)
     topics = config.get("research_profile", {}).get("directions") or [
@@ -132,11 +134,18 @@ def rank(papers: list[dict[str, Any]], interests: list[dict[str, Any]], config: 
     # Evidence-bearing candidates take priority over title-only records under a budget.
     pending.sort(key=lambda paper: (not bool(paper.get("abstract")), paper["id"]))
     to_encode = pending[:maximum]
-    encoded = encoder.encode_papers(to_encode)
-    for paper, vector in zip(to_encode, encoded):
-        vectors[paper["id"]] = vector
-        store.save_vector("paper:" + paper["id"], fingerprint([paper.get("title", ""), paper.get("abstract", "")]), encoder.signature,
-                          len(vector), struct.pack(f"<{len(vector)}f", *vector))
+    encoded = []
+    batch = int(settings.get("batch_size", 16)) if cancel is not None else max(1, len(to_encode))
+    for start in range(0, len(to_encode), batch):
+        if cancel is not None and cancel.is_set():
+            break
+        group = to_encode[start:start + batch]
+        values = encoder.encode_papers(group)
+        encoded.extend(values)
+        for paper, vector in zip(group, values):
+            vectors[paper["id"]] = vector
+            store.save_vector("paper:" + paper["id"], fingerprint([paper.get("title", ""), paper.get("abstract", "")]), encoder.signature,
+                              len(vector), struct.pack(f"<{len(vector)}f", *vector))
     for paper in papers:
         vector = vectors.get(paper["id"])
         if vector is None:
@@ -162,7 +171,7 @@ def rank(papers: list[dict[str, Any]], interests: list[dict[str, Any]], config: 
         group = [p for p in papers if bool(p.get("abstract")) == has_abstract]
         modalities[name] = {"total": len(group), "scored": sum(p["id"] in vectors for p in group),
                             "deferred": sum(p["id"] not in vectors for p in group)}
-    return {"relations": relation_stats, "cache_hits": hits, "encoded": len(encoded), "deferred": len(pending) - len(to_encode), "modalities": modalities,
+    return {"relations": relation_stats, "cache_hits": hits, "encoded": len(encoded), "deferred": len(pending) - len(encoded), "modalities": modalities,
             "profile_hash": profile_hash, "model_signature": encoder.signature}
 
 

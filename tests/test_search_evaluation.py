@@ -31,7 +31,7 @@ class HistoryTests(unittest.TestCase):
         self.temp.cleanup()
 
     def run_search(self, query='world model', split='dev'):
-        return search.run(self.config, self.path, query, split=split, cached_only=True)
+        return search.run(self.config, self.path, query, split=split, scope='all_with_preprints', cached_only=True)
 
     def label(self, result, index, grade, **kwargs):
         with self.store.connection:
@@ -126,7 +126,7 @@ class HistoryTests(unittest.TestCase):
     def test_failure_keeps_cached_snapshot_and_error_type(self):
         with mock.patch.object(search.sources, 'discover', side_effect=RuntimeError('private-url')):
             with self.assertRaises(RuntimeError):
-                search.run(self.config, self.path, 'world model')
+                search.run(self.config, self.path, 'world model', scope='all_with_preprints')
         result = history.get(self.store, history.recent(self.store)[0]['id'])
         self.assertEqual(result['state'], 'failed')
         self.assertEqual(len(result['results']), 3)

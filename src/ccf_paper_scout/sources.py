@@ -14,7 +14,7 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 
-from .source_adapters import HOSTS, OFFICIAL, key
+from .source_adapters import HOSTS, OFFICIAL, key, accumulate_diagnostics
 from . import identity, official_abstracts
 
 DEFAULTS = {
@@ -60,7 +60,15 @@ def provider_settings(settings, source):
 
 def terminate(process):
     if process.poll() is None:
-        process.terminate()
+        if os.name == 'nt':
+            # A Windows venv launcher has a separate Python child; stop the whole owned tree.
+            stopped = subprocess.run(['taskkill.exe', '/PID', str(process.pid), '/T', '/F'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW, timeout=5)
+            if stopped.returncode and process.poll() is None:
+                raise RuntimeError('source_process_termination_failed')
+        else:
+            process.terminate()
         try:
             process.wait(timeout=2)
         except subprocess.TimeoutExpired:
@@ -69,11 +77,19 @@ def terminate(process):
 
 
 def consume_pages(store, source, state):
+    for path in sorted(state['directory'].glob('cache-*.json')):
+        store.save_http_cache(source, json.loads(path.read_text(encoding='utf-8')))
+        path.unlink()
     for path in sorted(state['directory'].glob('page-*.json')):
         if path.name in state['pages']:
             continue
         payload = json.loads(path.read_text(encoding='utf-8'))
-        saved = store.save_source_page(source, payload)
+        counts = {}
+        saved = store.save_source_page(source, payload, counts=counts)
+        for name, count in counts.items():
+            state[name] = state.get(name, 0) + count
+        diagnostics = payload.get('diagnostics', {})
+        accumulate_diagnostics(state, diagnostics)
         state['records'] += len(saved)
         state['pages'].add(path.name)
         print(f'source={source} page={len(state["pages"])} stored={state["records"]}', flush=True)
@@ -120,7 +136,9 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
                     health = store.source_health(source)
                     current = dt.datetime.now(dt.timezone.utc)
                     if health.get('retry_at', '') > current.isoformat():
-                        results[source] = dict(health, status='cooldown', stored=0, requests=0)
+                        results[source] = dict(health, status='cooldown', stored=0, requests=0,
+                                              new_records=0, abstracts_completed=0, discovered=0, failures={},
+                                              deferred=0, deferred_reasons={}, cache_hits=0, bytes=0, seconds=0)
                         continue
                     directory = root / source; directory.mkdir()
                     states = store.source_states(source)
@@ -139,10 +157,13 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
                         target = official_abstracts.official_url(paper) if source in OFFICIAL else None
                         if (target and urlsplit(target).hostname in HOSTS[source]) or (
                             source in ('openalex', 'crossref') and (identity.doi(paper.get('doi')) or identity.doi(paper.get('ee')))):
-                            lookups.append(paper)
+                            previous = states.get(key(source, ['lookup', paper['id']]), {})
+                            if previous.get('retry_at', '') <= current.isoformat():
+                                lookups.append(paper)
                     lookup_budget -= len(lookups)
                     task = dict(source=source, settings=provider, states=states, queries=queries,
-                                venue_keys=[v['dblp_key'] for v in venues], venues=venues, years=years, lookups=lookups)
+                                venue_keys=[v['dblp_key'] for v in venues], venues=venues, years=years, lookups=lookups,
+                                http_cache=store.http_cache(source))
                     path = directory / 'task.json'
                     path.write_text(json.dumps(task, ensure_ascii=False), encoding='utf-8')
                     log = (directory / 'worker.log').open('wb')
@@ -170,12 +191,18 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
                     terminate(state['process'])
                     consume_pages(store, source, state)
                     result_file = state['directory'] / 'result.json'
+                    progress_file = state['directory'] / 'progress.json'
+                    counters = json.loads(progress_file.read_text(encoding='utf-8')) if progress_file.exists() else {}
                     result = json.loads(result_file.read_text(encoding='utf-8')) if result_file.exists() else dict(
-                        status='cancelled' if cancelled else 'timeout' if timed_out else 'protocol_error',
-                        code='user_cancelled' if cancelled else 'source_deadline' if timed_out else 'worker_failed')
+                        status='cancelled' if cancelled else 'partial' if timed_out else 'protocol_error',
+                        code='user_cancelled' if cancelled else 'source_deadline' if timed_out else 'worker_failed', **counters)
                     if state['process'].returncode and not timed_out:
                         result.update(status='protocol_error', code='worker_failed')
                     result['stored'] = state['records']
+                    result.update({name: state.get(name, 0) for name in ('new_records', 'abstracts_completed')})
+                    for name in ('discovered', 'failures', 'deferred', 'deferred_reasons', 'next_entry_retry_at'):
+                        if name in state:
+                            result[name] = state[name]
                     if result['status'] not in ('ok', 'empty', 'partial', 'not_configured', 'cancelled'):
                         seconds = max(1800, float(result.get('retry_after', 0)))
                         if result['status'] in ('blocked', 'auth_required', 'protocol_error'):
@@ -188,7 +215,7 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
                     if progress:
                         progress(dict(providers=dict(results), pending=queue + list(active)))
                 if stopped:
-                    results.update({s: dict(status='cancelled' if cancelled else 'timeout',
+                    results.update({s: dict(status='cancelled' if cancelled else 'partial',
                         code='user_cancelled' if cancelled else 'collection_deadline', stored=0) for s in queue})
                     queue.clear()
                 if active:
@@ -198,5 +225,6 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
                 terminate(state['process'])
     healthy = sum(r.get('status') in ('ok', 'empty') for r in results.values())
     stored = sum(r.get('stored', 0) for r in results.values())
-    mode = 'live' if healthy == len(results) else 'partial_live' if stored else 'cached_only'
+    requests = sum(r.get('requests', 0) for r in results.values())
+    mode = 'cached_only' if not requests else 'live' if healthy == len(results) else 'partial_live' if stored else 'cached_only'
     return dict(mode=mode, providers=results, stored=stored, seconds=round(time.monotonic()-started, 3))

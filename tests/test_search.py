@@ -35,10 +35,15 @@ class SearchTests(unittest.TestCase):
 
     def test_scopes_keep_preprints_searchable_without_admitting_them_as_main(self):
         with mock.patch.object(sources, 'discover') as discover, mock.patch.object(paper_scout, 'send_email') as mail:
-            all_results = search.run(self.config, self.path, 'world model', cached_only=True)
+            all_results = search.run(self.config, self.path, 'world model', scope='all_with_preprints', cached_only=True)
+            default = search.run(self.config, self.path, 'world model', cached_only=True)
             main = search.run(self.config, self.path, 'world model', scope='verified_main', cached_only=True)
         self.assertEqual(len(all_results['results']), 2)
         self.assertEqual(len(main['results']), 1)
+        self.assertEqual(default['results'], main['results'])
+        self.assertEqual(default['request']['publication_scope'], 'published')
+        self.assertNotIn('crossref', default['request']['sources'])
+        self.assertNotIn('arxiv', default['request']['sources'])
         self.assertEqual(main['results'][0]['publication_label'], 'verified_main')
         discover.assert_not_called(); mail.assert_not_called()
 
@@ -46,7 +51,7 @@ class SearchTests(unittest.TestCase):
         event = threading.Event()
         def cached(result):
             self.assertEqual(result['state'], 'cached')
-            self.assertEqual(len(result['results']), 2)
+            self.assertEqual(len(result['results']), 1)
             event.set()
         with mock.patch.object(sources, 'discover') as discover:
             result = search.run(self.config, self.path, 'world model', cancel=event, update=cached)
@@ -57,8 +62,8 @@ class SearchTests(unittest.TestCase):
         store.close()
 
     def test_abstract_filter_is_explicit_and_part_of_frozen_request(self):
-        original = search.run(self.config, self.path, 'world model', cached_only=True)
-        filtered = search.run(self.config, self.path, 'world model', cached_only=True, require_abstract=True)
+        original = search.run(self.config, self.path, 'world model', scope='all_with_preprints', cached_only=True)
+        filtered = search.run(self.config, self.path, 'world model', scope='all_with_preprints', cached_only=True, require_abstract=True)
         self.assertEqual(len(original['results']), 2)
         self.assertEqual(len(filtered['results']), 1)
         self.assertTrue(filtered['request']['require_abstract'])
@@ -87,9 +92,28 @@ class SearchTests(unittest.TestCase):
         failure = dict(mode='cached_only', providers={'openalex': {'status':'timeout', 'stored':0}})
         with mock.patch.object(sources, 'discover', return_value=failure), mock.patch.object(paper_scout, 'fetch_zotero') as zotero:
             result = search.run(self.config, self.path, 'world model')
-        self.assertEqual(len(result['results']), 2)
+        self.assertEqual(len(result['results']), 1)
         self.assertEqual(result['discovery']['mode'], 'cached_only')
         zotero.assert_not_called()
+
+    def test_published_scope_rejects_untyped_legacy_dois_and_non_articles(self):
+        store = StateStore(self.path)
+        for index, kind in enumerate(['journal-article', 'proceedings-article', 'posted-content', 'dissertation', 'book-chapter', None]):
+            row = dict(DOI=f'10.1234/record{index}', title=[f'World model study {index}'],
+                       published={'date-parts': [[2025]]})
+            if kind:
+                row['type'] = kind
+            paper = source_adapters.crossref_record(row)
+            if kind is None:
+                paper.pop('publication_type')
+                paper['publication_status'] = 'published'  # Legacy cache from the old adapter.
+            store.save_source_page('crossref', dict(task_key=str(index), records=[paper], state={}))
+        result = search.run(self.config, self.path, 'world model', cached_only=True)
+        all_results = search.cached_results(store, 'world model', [2025], 'all_with_preprints', 20)
+        store.close()
+        self.assertEqual(len(result['results']), 3)  # Verified main + journal + proceedings article.
+        self.assertEqual(result['counts']['publication_filtered'], 5)
+        self.assertEqual(len(all_results), 8)
 
     def test_shadow_does_not_update_production_candidates_or_cursors(self):
         store = StateStore(self.path)
@@ -130,8 +154,9 @@ class SearchTests(unittest.TestCase):
         task = dict(source='crossref', states={}, lookups=[dict(id='old',doi='10.1234/a')])
         runtime = mock.Mock()
         runtime.json.return_value = {'message': {'DOI':'10.1234/b','title':['Different work']}}
-        with self.assertRaises(source_http.SourceError):
-            list(source_adapters.lookup(task, runtime))
+        mismatch = list(source_adapters.lookup(task, runtime))
+        self.assertEqual(mismatch[0]['records'], [])
+        self.assertEqual(mismatch[0]['state']['code'], 'lookup_identity_mismatch')
         runtime.json.side_effect = source_http.SourceError('not_found', 'http_404')
         result = list(source_adapters.lookup(task, runtime))
         self.assertEqual(result[0]['records'], [])

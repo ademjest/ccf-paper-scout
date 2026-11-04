@@ -29,8 +29,10 @@ class SearchServer(ThreadingHTTPServer):
     def start_search(self, arguments):
         # Validate synchronously before creating a worker or spending any requests.
         search.settings(self.config, arguments.get('query'), arguments.get('sources'), arguments.get('years'))
-        if arguments.get('publication_scope', 'all_with_preprints') not in search.SCOPES:
+        if arguments.get('publication_scope', 'published') not in search.SCOPES:
             raise ValueError('invalid publication_scope')
+        if arguments.get('ranking', 'hybrid') not in search.RANKINGS:
+            raise ValueError('invalid search ranking')
         with self.lock:
             if self.worker and self.worker.is_alive():
                 return None
@@ -45,9 +47,10 @@ class SearchServer(ThreadingHTTPServer):
             def execute():
                 try:
                     result = search.run(self.config, self.database, arguments['query'], enabled=arguments.get('sources'),
-                        years=arguments.get('years'), scope=arguments.get('publication_scope', 'all_with_preprints'),
+                        years=arguments.get('years'), scope=arguments.get('publication_scope', 'published'),
                         cancel=self.cancel, update=update, search_id=identifier, split=arguments.get('split', 'dev'),
-                        cached_only=arguments.get('cached_only', False), require_abstract=arguments.get('require_abstract', False))
+                        cached_only=arguments.get('cached_only', False), require_abstract=arguments.get('require_abstract', False),
+                        ranking=arguments.get('ranking', 'hybrid'))
                     update(result)
                 except Exception as exc:
                     # Do not expose tracebacks or credential-bearing provider URLs in the UI.

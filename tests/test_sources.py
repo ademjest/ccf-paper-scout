@@ -64,6 +64,16 @@ class HttpTests(unittest.TestCase):
                 with self.assertRaises(source_http.SourceError):
                     runtime.json('https://api.openalex.org/works', max_bytes=limit)
 
+    def test_connection_failure_is_not_reported_as_timeout(self):
+        runtime = self.runtime()
+        with mock.patch.object(runtime, 'wait'), mock.patch.object(runtime.session, 'get',
+                side_effect=requests.ConnectionError('private proxy details')) as get:
+            with self.assertRaises(source_http.SourceError) as failure:
+                runtime.get('https://api.openalex.org/works')
+        self.assertEqual((failure.exception.status, failure.exception.code), ('unavailable', 'connection_failed'))
+        self.assertNotIn('private', str(failure.exception))
+        self.assertEqual(get.call_count, 2)
+
     def test_untrusted_redirect_does_not_receive_credentials(self):
         runtime = self.runtime()
         with mock.patch.object(runtime.session, 'get', return_value=Response(302, headers={'Location':'https://attacker.invalid/'})) as get:
@@ -154,6 +164,8 @@ else:
  (out/'result.json').write_text(json.dumps(dict(status='empty',requests=0,records=0)),encoding='utf-8')
 """
         def launch(command, **kwargs):
+            if command[0] != sys.executable:
+                return real_popen(command, **kwargs)
             process = real_popen([sys.executable, '-c', code, command[-3], command[-1]], **kwargs)
             children.append(process)
             return process
@@ -162,7 +174,8 @@ else:
         started = time.monotonic()
         with mock.patch.object(sources.subprocess, 'Popen', side_effect=launch):
             result = sources.discover(self.store, config, [], [2025], 'test')
-        self.assertEqual(result['providers']['dblp']['status'], 'timeout')
+        self.assertEqual(result['providers']['dblp']['status'], 'partial')
+        self.assertNotIn('retry_at', self.store.source_health('dblp'))
         self.assertEqual(result['providers']['openalex']['status'], 'empty')
         self.assertLess(time.monotonic()-started, 4)
         self.assertTrue(all(p.poll() is not None for p in children))
@@ -178,6 +191,27 @@ else:
 
 
 class AdapterTests(unittest.TestCase):
+    def test_crossref_doi_does_not_imply_a_published_article(self):
+        for kind, status in [('journal-article', 'published'), ('proceedings-article', 'published'),
+                             ('posted-content', 'preprint'), ('dissertation', 'thesis'),
+                             ('book-chapter', 'unknown'), ('book', 'unknown'), (None, 'unknown')]:
+            with self.subTest(kind=kind):
+                row = dict(DOI='10.1234/example', title=['World model'], type=kind)
+                paper = source_adapters.crossref_record(row)
+                self.assertEqual(paper['publication_status'], status)
+                self.assertEqual(paper['publication_type'], kind)
+
+    def test_openalex_requires_published_article_evidence(self):
+        for kind, published, status in [('article', True, 'published'), ('article', False, 'unknown'),
+                                        ('article', None, 'unknown'), ('preprint', True, 'preprint'),
+                                        ('dissertation', True, 'thesis'), ('book-chapter', True, 'unknown')]:
+            with self.subTest(kind=kind, published=published):
+                row = dict(id='https://openalex.org/W1', title='World model', type=kind,
+                           primary_location={'is_published': published})
+                paper = source_adapters.openalex_record(row)
+                self.assertEqual(paper['publication_status'], status)
+                self.assertEqual(paper['publication_type'], kind)
+
     def task(self, source):
         return dict(source=source, years=[2025], venue_keys=['icml','nips'], queries=['world model'], states={}, settings={'papers_per_volume':1})
 
@@ -187,9 +221,10 @@ class AdapterTests(unittest.TestCase):
         runtime = mock.Mock()
         runtime.get.side_effect = [html, body]
         pages = list(source_adapters.official(self.task('pmlr'), runtime))
-        self.assertEqual(len(pages), 1)
-        self.assertIn('https://proceedings.mlr.press/v267/test25.html', pages[0]['state']['done'])
-        self.assertEqual(pages[0]['records'][0]['venue_key'], 'icml')
+        self.assertEqual(len(pages), 2)
+        self.assertEqual(pages[0]['records'], [])
+        self.assertIn('https://proceedings.mlr.press/v267/test25.html', pages[1]['state']['done'])
+        self.assertEqual(pages[1]['records'][0]['venue_key'], 'icml')
 
     def test_directory_resume_skips_completed_pages(self):
         task = self.task('pmlr')
@@ -204,8 +239,9 @@ class AdapterTests(unittest.TestCase):
     def test_neurips_workshop_entry_does_not_become_main(self):
         runtime=mock.Mock()
         runtime.get.return_value='<html><li data-track="workshop"><a href="/paper_files/paper/2025/hash/aaaa-Abstract-Conference.html">World model</a></li></html>'
-        with self.assertRaises(source_http.SourceError):
-            list(source_adapters.official(self.task('neurips'), runtime))
+        pages = list(source_adapters.official(self.task('neurips'), runtime))
+        self.assertFalse(any(p['records'] for p in pages))
+        self.assertEqual(pages[0]['state']['code'], 'directory_has_no_papers')
 
     def test_arxiv_version_and_preprint_status(self):
         runtime=mock.Mock()

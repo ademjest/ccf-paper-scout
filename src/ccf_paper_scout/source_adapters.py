@@ -23,6 +23,7 @@ HOSTS = {
     'semantic_scholar': {'api.semanticscholar.org'}, 'openreview': {'api2.openreview.net'},
 }
 OFFICIAL = {'pmlr', 'neurips', 'acl', 'cvf', 'aaai'}
+PUBLISHED_TYPES = {'journal-article', 'proceedings-article', 'article'}
 
 
 @lru_cache(maxsize=1)
@@ -40,8 +41,35 @@ def key(source, arguments):
     return source + ':' + hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest()[:24]
 
 
-def page(task_key, records, state):
-    return dict(task_key=task_key, records=records, state=state)
+def page(task_key, records, state, **diagnostics):
+    return dict(task_key=task_key, records=records, state=state, diagnostics=diagnostics)
+
+
+def accumulate_diagnostics(target, diagnostics):
+    for name in ('discovered', 'deferred'):
+        target[name] = target.get(name, 0) + diagnostics.get(name, 0)
+    for name in ('failures', 'deferred_reasons'):
+        counts = target.setdefault(name, {})
+        for code, count in diagnostics.get(name, {}).items():
+            counts[code] = counts.get(code, 0) + count
+    retry = diagnostics.get('next_entry_retry_at')
+    if retry:
+        target['next_entry_retry_at'] = min(target.get('next_entry_retry_at', retry), retry)
+
+
+def deferred(exc, previous):
+    """Per-entry retry state, separate from source health and discovery cursors."""
+    stamp = dt.datetime.now(dt.timezone.utc)
+    delay = max(exc.retry_after, {'timeout': 3600, 'unavailable': 3600, 'rate_limited': 60,
+                                 'blocked': 86400, 'auth_required': 86400}.get(exc.status, 7 * 86400))
+    return dict(previous, status='retry', code=exc.code, attempts=previous.get('attempts', 0) + 1,
+                checked_at=stamp.isoformat(), retry_at=(stamp + dt.timedelta(seconds=delay)).isoformat())
+
+
+def source_failure(exc, consecutive):
+    return (exc.status in ('rate_limited', 'blocked', 'auth_required', 'partial')
+            or exc.code in ('source_deadline', 'untrusted_endpoint')
+            or (exc.status in ('timeout', 'unavailable') and consecutive >= 2))
 
 
 def record(source, identifier, title, authors, year, **extra):
@@ -107,57 +135,100 @@ def official(task, runtime):
                and v['venue'] in task['venue_keys']]
     if not entries:
         raise SourceError('not_configured', 'no_reviewed_volume')
-    # Round-robin directories across runs; a large first volume must not starve the others.
     entries.sort(key=lambda v: task['states'].get(key(source, v['url']), {}).get('checked_at', ''))
     tokens = {t.lower() for q in queries(task) for t in re.findall(r'[a-zA-Z]{4,}', q)}
+    consecutive = 0
     for volume in entries:
         task_key = key(source, volume['url'])
         previous = task['states'].get(task_key, {})
-        html = runtime.get(volume['url'], max_bytes=12_000_000)
-        if '</html>' not in html.lower():
-            raise SourceError('protocol_error', 'incomplete_directory')
-        parser = DirectoryHTML(); parser.feed(html)
-        links = {}
-        for link in parser.links:
-            url = urljoin(volume['url'], link['url'])
-            parsed = urlsplit(url)
-            if parsed.hostname != urlsplit(volume['url']).hostname or not re.fullmatch(volume['path_pattern'], parsed.path):
-                continue
-            if volume.get('entry_track') and link['track'] != volume['entry_track']:
-                continue
-            links[url] = link['title'] or link['text']
-        if not links:
-            raise SourceError('protocol_error', 'directory_has_no_papers')
+        stamp = dt.datetime.now(dt.timezone.utc).isoformat()
+        state = dict(previous)
+        if previous.get('retry_at', '') > stamp:
+            yield page(task_key, [], previous, deferred=1, deferred_reasons={previous.get('code', 'entry_retry'): 1},
+                       next_entry_retry_at=previous['retry_at'])
+            continue
+        try:
+            if not previous.get('entries') or previous.get('refresh_at', '') <= stamp or previous.get('rule_version') != catalog()['version']:
+                html = runtime.get(volume['url'], max_bytes=12_000_000, cache_seconds=21600)
+                if '</html>' not in html.lower():
+                    raise SourceError('protocol_error', 'incomplete_directory')
+                parser = DirectoryHTML(); parser.feed(html)
+                links = {}
+                for link in parser.links:
+                    url = urljoin(volume['url'], link['url'])
+                    parsed = urlsplit(url)
+                    if parsed.hostname != urlsplit(volume['url']).hostname or not re.fullmatch(volume['path_pattern'], parsed.path):
+                        continue
+                    if volume.get('entry_track') and link['track'] != volume['entry_track']:
+                        continue
+                    links[url] = dict(previous.get('entries', {}).get(url, {}), title=link['title'] or link['text'])
+                if not links:
+                    raise SourceError('protocol_error', 'directory_has_no_papers')
+                state.update(entries=links, directory_hash=hashlib.sha256(html.encode()).hexdigest(),
+                    rule_version=catalog()['version'], code='', retry_at='', checked_at=stamp,
+                    refresh_at=(dt.datetime.now(dt.timezone.utc)+dt.timedelta(hours=6)).isoformat())
+                # A durable discovery checkpoint precedes every detail request, even with no candidate records.
+                yield page(task_key, [], state, discovered=len(set(links)-set(previous.get('entries', {}))))
+            consecutive = 0
+        except SourceError as exc:
+            if source_failure(exc, consecutive + 1):
+                raise
+            consecutive = consecutive + 1 if exc.status in ('timeout', 'unavailable') else 0
+            yield page(task_key, [], deferred(exc, previous), failures={exc.code: 1})
+            continue
         done = set(previous.get('done', []))
-        pending = sorted((u for u in links if identity.url(u) not in done), key=lambda url: (-sum(t in links[url].lower() for t in tokens), url))
-        digest = hashlib.sha256(html.encode()).hexdigest()
-        # Bound work per directory as well as per source to preserve coverage.
+        pending = sorted((url for url, entry in state['entries'].items()
+            if (entry.get('retry_at', '') <= stamp or entry.get('abstract_status') == 'valid')
+            and (entry.get('abstract_status') != 'valid' or entry.get('parser_version') != official_abstracts.PARSER_VERSION)
+            and not (identity.url(url) in done and not entry.get('status'))),
+            key=lambda url: (-sum(t in state['entries'][url]['title'].lower() for t in tokens), url))
         for url in pending[:int(task['settings'].get('papers_per_volume', 12))]:
-            document = runtime.get(url)
-            parsed = official_abstracts.PaperHTML(); parsed.feed(document)
-            titles = parsed.meta.get('citation_title', [])
-            authors = parsed.meta.get('citation_author', [])
-            if len(titles) != 1 or not authors:
-                raise SourceError('protocol_error', 'missing_official_identity')
-            paper = record(source, url, titles[0], authors, volume['year'], url=url, ee=url)
-            abstract = ' '.join(''.join(parsed.abstract).split())
-            if not abstract:
-                abstract = ' '.join(parsed.meta.get('description', []))
-            paper.update(doi=identity.doi(next(iter(parsed.meta.get('citation_doi', [])), '')),
-                         venue_key=volume['venue'], venue=volume['venue'].upper(), rank='A',
-                         proceedings_id=volume['proceedings_id'], publication_status='published',
-                         abstract=abstract if len(abstract) >= 80 and not official_abstracts.is_bibliographic_placeholder(abstract) else '',
-                         abstract_source=source, abstract_source_url=url)
-            paper['publication_evidence'] = [dict(kind='official_volume_membership', source=source,
-                volume_url=volume['url'], paper_url=url, entry_track=volume.get('entry_track', ''),
-                venue_key=volume['venue'], year=volume['year'], track=volume['track'],
-                proceedings_id=volume['proceedings_id'], content_hash=digest,
-                rule_version=catalog()['version'], retrieved_at=dt.datetime.now(dt.timezone.utc).isoformat())]
-            done.add(identity.url(url))
-            yield page(task_key, [paper], dict(done=sorted(done), directory_hash=digest,
-                checked_at=dt.datetime.now(dt.timezone.utc).isoformat(), exhausted=len(done & {identity.url(u) for u in links}) == len(links)))
-        if not pending:
-            yield page(task_key, [], dict(previous, checked_at=dt.datetime.now(dt.timezone.utc).isoformat(), exhausted=True))
+            entry = state['entries'][url]
+            try:
+                document = runtime.get(url, cache_seconds=604800)
+                parsed = official_abstracts.PaperHTML(); parsed.feed(document)
+                titles = parsed.meta.get('citation_title', [])
+                authors = parsed.meta.get('citation_author', [])
+                if len(titles) != 1 or not authors:
+                    raise SourceError('protocol_error', 'missing_official_identity')
+                paper = record(source, url, titles[0], authors, volume['year'], url=url, ee=url)
+                fields = official_abstracts.abstract_fields(parsed)
+                paper.update(fields, doi=identity.doi(next(iter(parsed.meta.get('citation_doi', [])), '')),
+                    venue_key=volume['venue'], venue=volume['venue'].upper(), rank='A',
+                    proceedings_id=volume['proceedings_id'], publication_status='published',
+                    abstract_source=source, abstract_source_url=url, abstract_fetched_at=stamp)
+                paper['publication_evidence'] = [dict(kind='official_volume_membership', source=source,
+                    volume_url=volume['url'], paper_url=url, entry_track=volume.get('entry_track', ''),
+                    venue_key=volume['venue'], year=volume['year'], track=volume['track'],
+                    proceedings_id=volume['proceedings_id'], content_hash=state['directory_hash'],
+                    rule_version=catalog()['version'], retrieved_at=state['checked_at'])]
+                state['entries'][url] = dict(entry, status='complete', abstract_status=fields['abstract_status'],
+                    parser_version=official_abstracts.PARSER_VERSION,
+                    code='', attempts=entry.get('attempts', 0)+1, checked_at=stamp,
+                    retry_at=(dt.datetime.now(dt.timezone.utc)+dt.timedelta(days=7)).isoformat())
+                done.add(identity.url(url))
+                state.update(done=sorted(done), exhausted=all(identity.url(u) in done for u in state['entries']))
+                consecutive = 0
+                yield page(task_key, [paper], state)
+            except SourceError as exc:
+                if exc.code in ('source_deadline', 'request_budget'):
+                    raise  # No failed-paper retry state for an exhausted run budget.
+                consecutive = consecutive + 1 if exc.status in ('timeout', 'unavailable') else 0
+                state['entries'][url] = deferred(exc, entry)
+                yield page(task_key, [], state, failures={exc.code: 1})
+                if source_failure(exc, consecutive):
+                    raise
+        waiting = [e for e in state['entries'].values() if e.get('abstract_status') != 'valid' and e.get('retry_at', '') > stamp]
+        if waiting:
+            reasons = {}
+            for entry in waiting:
+                code = entry.get('code') or 'no_valid_abstract'
+                reasons[code] = reasons.get(code, 0) + 1
+            yield page(task_key, [], state, deferred=len(waiting), deferred_reasons=reasons,
+                       next_entry_retry_at=min(e['retry_at'] for e in waiting))
+        elif not pending:
+            state.update(exhausted=all(identity.url(u) in done for u in state['entries']))
+            yield page(task_key, [], state)
 
 
 def openalex(task, runtime):
@@ -182,7 +253,12 @@ def openalex_record(row):
         row.get('publication_year'), url=row.get('doi') or row['id'], doi=identity.doi(row.get('doi')))
     words = [(pos, word) for word, positions in (row.get('abstract_inverted_index') or {}).items() for pos in positions]
     paper.update(abstract=' '.join(word for _, word in sorted(words)), abstract_source='openalex',
-                 publication_date=row.get('publication_date'))
+                 publication_date=row.get('publication_date'), publication_type=row.get('type', 'unknown'))
+    kind = paper['publication_type']
+    if kind in ('preprint', 'dissertation'):
+        paper['publication_status'] = 'preprint' if kind == 'preprint' else 'thesis'
+    elif kind in PUBLISHED_TYPES and (row.get('primary_location') or {}).get('is_published') is True:
+        paper['publication_status'] = 'published'
     for location in row.get('locations') or []:
         landing = location.get('landing_page_url') or ''
         if urlsplit(landing).hostname in set().union(*(HOSTS[s] for s in OFFICIAL)):
@@ -243,14 +319,19 @@ def crossref_record(row):
     paper = record('crossref', row['DOI'].lower(), next(iter(row.get('title', [])), ''),
         [' '.join(filter(None, (a.get('given'), a.get('family')))) for a in row.get('author', [])],
         date[0], doi=identity.doi(row['DOI']), url=row.get('URL', ''))
+    kind = row.get('type', 'unknown')
+    status = 'published' if kind in PUBLISHED_TYPES else {
+        'posted-content': 'preprint', 'dissertation': 'thesis'}.get(kind, 'unknown')
     paper.update(abstract=re.sub(r'<[^>]+>', '', row.get('abstract', '')), abstract_source='crossref',
-                 venue_claim=' '.join(row.get('container-title', [])), publication_status='published')
+                 venue_claim=' '.join(row.get('container-title', [])),
+                 publication_type=kind, publication_status=status)
     return paper
 
 
 def lookup(task, runtime):
     """Exact identity lookups share the source's request and wall-clock budget."""
     source = task['source']
+    consecutive = 0
     for paper in task.get('lookups', []):
         task_key = key(source, ['lookup', paper['id']])
         previous = task['states'].get(task_key, {})
@@ -262,9 +343,12 @@ def lookup(task, runtime):
                 url = official_abstracts.official_url(paper)
                 if not url or urlsplit(url).hostname not in HOSTS[source]:
                     continue
-                abstract = official_abstracts.parse_abstract(runtime.get(url), paper, allow_missing=True)
+                try:
+                    abstract = official_abstracts.parse_abstract(runtime.get(url, cache_seconds=604800), paper, allow_missing=True)
+                except official_abstracts.IdentityMismatch as exc:
+                    raise SourceError('protocol_error', str(exc)) from None
                 result = dict(paper, source_record_id=identity.url(url), abstract=abstract,
-                              abstract_source=source, abstract_source_url=url)
+                              abstract_source=source, abstract_source_url=url, abstract_method='container')
             elif source == 'openalex' and doi:
                 token = os.environ.get('OPENALEX_API_KEY', '')
                 result = openalex_record(runtime.json('https://api.openalex.org/works/' + quote('https://doi.org/' + doi, safe=''),
@@ -276,13 +360,23 @@ def lookup(task, runtime):
                 continue
             if source not in OFFICIAL and identity.doi(result.get('doi')) != doi:
                 raise SourceError('protocol_error', 'lookup_identity_mismatch')
-            records = [result]
+            result['abstract'] = official_abstracts.usable_abstract(result.get('abstract', ''))
+            stamp = dt.datetime.now(dt.timezone.utc)
+            result.update(abstract_status='valid' if result['abstract'] else 'missing',
+                          abstract_fetched_at=stamp.isoformat())
+            if source not in OFFICIAL:
+                result.update(abstract_method='api', abstract_source_url=result.get('url', ''))
+            consecutive = 0
+            yield page(task_key, [result], dict(status='complete', abstract_status=result['abstract_status'],
+                attempts=previous.get('attempts', 0)+1, checked_at=stamp.isoformat(),
+                retry_at=(stamp+dt.timedelta(days=7)).isoformat()))
         except SourceError as exc:
-            if exc.status != 'not_found':
+            if exc.code in ('source_deadline', 'request_budget'):
                 raise
-            records = []
-        # Missing abstracts and exact-ID 404s are retried later, not on every daily run.
-        yield page(task_key, records, dict(retry_at=(dt.datetime.now(dt.timezone.utc)+dt.timedelta(days=7)).isoformat()))
+            consecutive = consecutive + 1 if exc.status in ('timeout', 'unavailable') else 0
+            yield page(task_key, [], deferred(exc, previous), failures={exc.code: 1})
+            if source_failure(exc, consecutive):
+                raise
 
 
 def semantic_scholar(task, runtime):

@@ -23,7 +23,9 @@ def export(store, identifiers=None):
         queries.append(dict(search_id=identifier, query=result['query'], query_key=result['query_key'],
             request=result['request'], split=result['split'], snapshot_hash=result['snapshot_hash'], papers=papers,
             ranking=[p['id'] for p in papers], judgments={p['id']: p['judgments'] for p in result['results']},
-            timing=result.get('timing', {}), discovery=result['discovery'], counts=result.get('counts', {})))
+            timing=result.get('timing', {}), discovery=result['discovery'], counts=result.get('counts', {}),
+            ranking_method=result.get('ranking', 'lexical'), ranking_version=result.get('ranking_version', 'lexical-v1'),
+            ranking_details=result.get('ranking_details', {})))
     return dict(schema='scout-search-evaluation-v1', queries=queries)
 
 

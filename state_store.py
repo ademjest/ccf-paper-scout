@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS source_tasks(
 CREATE TABLE IF NOT EXISTS source_health(
   source TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS source_http_cache(
+  cache_key TEXT PRIMARY KEY, source TEXT NOT NULL, payload_json TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL, fetched_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS source_runs(
   run_id TEXT NOT NULL, source TEXT NOT NULL, payload_json TEXT NOT NULL,
   PRIMARY KEY(run_id,source)
@@ -112,6 +116,7 @@ class StateStore:
         if "state_json" not in columns:
             self.connection.execute("ALTER TABLE source_cursors ADD COLUMN state_json TEXT NOT NULL DEFAULT '{}'")
         self.connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (3, ?)", (now(),))
+        self.connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (5, ?)", (now(),))
         self.connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (1, ?)", (now(),))
         self.connection.commit()
         if not self.connection.execute('SELECT 1 FROM schema_migrations WHERE version=4').fetchone():
@@ -148,15 +153,34 @@ class StateStore:
         row = self.connection.execute('SELECT payload_json FROM source_health WHERE source=?', (source,)).fetchone()
         return json.loads(row[0]) if row else {}
 
+    def http_cache(self, source: str) -> dict:
+        return {key: json.loads(raw) for key, raw in self.connection.execute(
+            'SELECT cache_key,payload_json FROM source_http_cache WHERE source=?', (source,))}
+
+    def save_http_cache(self, source: str, entry: dict) -> None:
+        raw = json.dumps(entry, ensure_ascii=False)
+        with self.connection:
+            self.connection.execute('INSERT OR REPLACE INTO source_http_cache VALUES (?,?,?,?,?)',
+                (entry['cache_key'], source, raw, len(raw.encode('utf-8')), entry['fetched_at']))
+            # A small response cache, not an unbounded archive of publisher pages.
+            total, count = 0, 0
+            for key, size, fetched in self.connection.execute(
+                    'SELECT cache_key,size_bytes,fetched_at FROM source_http_cache ORDER BY fetched_at DESC').fetchall():
+                total += size
+                count += 1
+                if total > 64 * 1024 * 1024 or count > 64 or fetched < entry['fetched_at'] - 14 * 86400:
+                    self.connection.execute('DELETE FROM source_http_cache WHERE cache_key=?', (key,))
+
     def save_source_health(self, source: str, run_id: str, status: dict) -> None:
         with self.connection:
             self.connection.execute('INSERT OR REPLACE INTO source_health VALUES (?,?,?)', (source, json.dumps(status), now()))
             self.connection.execute('INSERT OR REPLACE INTO source_runs VALUES (?,?,?)', (run_id, source, json.dumps(status)))
 
-    def save_source_page(self, source: str, page: dict) -> list[str]:
+    def save_source_page(self, source: str, page: dict, *, counts=None) -> list[str]:
         """Identity, provenance, candidates and page checkpoint commit together."""
         from ccf_paper_scout import identity, official_abstracts
         saved = []
+        changes = dict(new_records=0, abstracts_completed=0)
         with self.connection:
             for record in page['records']:
                 paper = dict(record, source=source)
@@ -195,12 +219,18 @@ class StateStore:
                     for key in ('venue_key', 'venue', 'year', 'proceedings_id', 'rank', 'type', 'url', 'ee', 'publication_status'):
                         if key in old:
                             merged[key] = old[key]
-                if official_abstracts.usable_abstract(old.get('abstract', '')) and not paper.get('publication_evidence'):
+                if official_abstracts.usable_abstract(old.get('abstract', '')):
                     merged['abstract'] = old['abstract']
-                    for key in ('abstract_source', 'abstract_source_url'):
+                    for key in ('abstract_source', 'abstract_source_url', 'abstract_status', 'abstract_method', 'abstract_fetched_at', 'abstract_diagnostic', 'abstract_parser_version'):
                         if key in old:
                             merged[key] = old[key]
+                    if paper['abstract'] and official_abstracts.normalized(paper['abstract']) != official_abstracts.normalized(old['abstract']):
+                        merged['abstract_diagnostic'] = 'conflicting_sources'
                 merged['abstract'] = official_abstracts.usable_abstract(merged.get('abstract', ''))
+                if merged['abstract']:
+                    merged['abstract_status'] = 'valid'
+                changes['new_records'] += not bool(old)
+                changes['abstracts_completed'] += bool(old) and not official_abstracts.usable_abstract(old.get('abstract', '')) and bool(merged['abstract'])
                 venue, year = merged.get('venue_key', ''), int(merged.get('year') or 0)
                 self._upsert_candidate(venue, year, merged, bool(page.get('historical', True)))
                 self.connection.execute('UPDATE candidate_papers SET venue_key=?,year=?,payload_json=?,text_hash=? WHERE paper_id=?',
@@ -208,6 +238,8 @@ class StateStore:
                 saved.append(identifier)
             self.connection.execute('INSERT OR REPLACE INTO source_tasks VALUES (?,?,?,?)',
                                     (page['task_key'], source, json.dumps(page['state']), now()))
+        if counts is not None:
+            counts.update(changes)
         return saved
 
     def search_candidates(self, limit: int = 5000) -> list[dict]:
