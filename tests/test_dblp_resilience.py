@@ -1,4 +1,6 @@
 import email.message
+import contextlib
+import io
 import importlib.util
 import json
 import os
@@ -97,11 +99,13 @@ class DblpResilienceTests(unittest.TestCase):
         url = "https://sparql.dblp.org/sparql"
         unavailable = urllib.error.HTTPError(url, 503, "Unavailable", {}, None)
         response = FakeResponse(json.dumps({"ok": True}))
+        output = io.StringIO()
         with mock.patch.object(scout.urllib.request, "urlopen", side_effect=[unavailable, response]) as urlopen, \
-             mock.patch.object(scout.time, "sleep"):
+             mock.patch.object(scout.time, "sleep"), contextlib.redirect_stderr(output):
             payload = scout.request_dblp_json(url, "test", attempts=2)
         self.assertEqual(payload, {"ok": True})
         self.assertEqual(urlopen.call_count, 2)
+        self.assertIn('DBLP retry 1/2: HTTP 503; wait=', output.getvalue())
 
     def test_process_wide_throttle_waits_between_requests(self):
         scout._DBLP_LAST_REQUEST_AT = 10.0

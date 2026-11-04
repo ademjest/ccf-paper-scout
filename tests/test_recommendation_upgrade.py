@@ -1,5 +1,7 @@
 import argparse
 import datetime as dt
+import contextlib
+import io
 import json
 import pathlib
 import sqlite3
@@ -122,6 +124,21 @@ class DiscoveryTests(StoreFixture, unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "success ratio"):
             discovery.discover(self.store, VENUES, [2026], self.config(), "test", mock.Mock(side_effect=RuntimeError("timeout")))
         self.assertEqual(self.store.load_cursor("DBLP", "aaai", 2026), 0)
+
+    def test_partial_scan_failure_is_logged_and_resumes_failed_page(self):
+        output = io.StringIO()
+        fetch = mock.Mock(side_effect=[([paper(), paper(1)], None, 2), RuntimeError("HTTP 503")])
+        with contextlib.redirect_stdout(output), self.assertRaisesRegex(RuntimeError, '0/1 active partitions'):
+            discovery.discover(self.store, VENUES, [2026], self.config(
+                max_pages_per_run=2, max_pages_per_partition_per_run=2), "test", fetch)
+        self.assertIn('status=failed request_offset=2 retained_offset=2 error=HTTP 503', output.getvalue())
+        self.assertNotIn('status=partial', output.getvalue())
+        self.assertEqual(len(self.store.candidates(['aaai'], [2026])), 2)
+        self.assertEqual(self.store.scan_state('aaai', 2026)['last_error'], 'HTTP 503')
+        resumed = mock.Mock(return_value=([paper(2)], 3, 1))
+        discovery.discover(self.store, VENUES, [2026], self.config(), 'test', resumed)
+        self.assertEqual(resumed.call_args.args[3], 2)
+        self.assertEqual(self.store.scan_state('aaai', 2026)['last_error'], '')
 
     def test_overlap_has_forward_progress(self):
         fetch = mock.Mock(return_value=([paper(), paper(1)], None, 2))
