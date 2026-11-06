@@ -14,6 +14,9 @@ def load_config(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     from .discovery import resolve_years
     resolve_years(payload)
+    if payload.get('sources', {}).get('enabled'):
+        from .sources import validate
+        validate(payload['sources'])
     if not isinstance(payload.get("venue_keys"), list):
         raise ValueError("venue_keys must be a list")
     max_results = int(payload.get("max_results", 20))
@@ -86,6 +89,40 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser = sub.add_parser("doctor")
     doctor_parser.add_argument("--config", type=Path, default=Path("config.json"))
     doctor_parser.add_argument("--no-network", action="store_true")
+    doctor_parser.add_argument("--sources", action="store_true", help="diagnose literature sources without Zotero/SMTP")
+    doctor_parser.add_argument("--network", action="store_true", help="make bounded public-source probes")
+    search_parser = sub.add_parser('search')
+    search_parser.add_argument('--config', type=Path, default=Path('config.example.json'))
+    search_parser.add_argument('--query', required=True)
+    search_parser.add_argument('--sources', nargs='+')
+    search_parser.add_argument('--years', nargs='+', type=int)
+    search_parser.add_argument('--scope', choices=('verified_main', 'published', 'all_with_preprints'), default='published')
+    search_parser.add_argument('--limit', type=int, default=20)
+    search_parser.add_argument('--cached-only', action='store_true')
+    search_parser.add_argument('--require-abstract', action='store_true', help='exclude records without a usable abstract')
+    search_parser.add_argument('--ranking', choices=('lexical', 'hybrid', 'semantic'), default='lexical',
+                               help='hybrid/semantic use a cached local embedding model')
+    search_parser.add_argument('--output', type=Path)
+    search_parser.add_argument('--split', choices=('dev', 'test'), default='dev')
+    history_parser = sub.add_parser('search-history')
+    history_parser.add_argument('--config', type=Path, default=Path('config.example.json'))
+    export_parser = sub.add_parser('search-export')
+    export_parser.add_argument('--config', type=Path, default=Path('config.example.json'))
+    export_parser.add_argument('--output', type=Path, required=True)
+    export_parser.add_argument('--search-ids', nargs='+')
+    export_parser.add_argument('--ai-tasks', action='store_true')
+    import_parser = sub.add_parser('search-import-ai')
+    import_parser.add_argument('--config', type=Path, default=Path('config.example.json'))
+    import_parser.add_argument('--input', type=Path, required=True)
+    evaluation_parser = sub.add_parser('search-evaluate')
+    evaluation_parser.add_argument('--input', type=Path, required=True)
+    evaluation_parser.add_argument('--output', type=Path, required=True)
+    evaluation_parser.add_argument('--ranking', choices=('stored', 'lexical'), default='stored')
+    evaluation_parser.add_argument('--rankings', type=Path, help='optional comparison rankings for the same frozen pool')
+    evaluation_parser.add_argument('--k', type=int, default=5)
+    serve_parser = sub.add_parser('serve')
+    serve_parser.add_argument('--config', type=Path, default=Path('config.example.json'))
+    serve_parser.add_argument('--port', type=int, default=8765)
     sub.add_parser("run", add_help=False)
     sub.add_parser("discover", add_help=False)
     sub.add_parser("evaluate", add_help=False)
@@ -102,7 +139,54 @@ def main(argv: list[str] | None = None) -> int:
     elif unknown:
         parser.error("unrecognized arguments: " + " ".join(unknown))
     if args.command == "doctor":
+        if args.sources:
+            from .search import doctor as source_doctor
+            return source_doctor(load_config(args.config), args.network and not args.no_network)
         return doctor(args.config, not args.no_network)
+    if args.command == 'search':
+        from . import search
+        config = load_config(args.config)
+        result = search.run(config, search.database(config, args.config), args.query, enabled=args.sources,
+            years=args.years, scope=args.scope, limit=args.limit, cached_only=args.cached_only,
+            update=lambda value: print(json.dumps(value, ensure_ascii=False)), split=args.split, require_abstract=args.require_abstract,
+            ranking=args.ranking)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if args.command in ('search-history', 'search-export', 'search-import-ai', 'search-evaluate'):
+        from . import search, search_history, search_evaluation
+        from state_store import StateStore
+        if args.command == 'search-evaluate':
+            snapshot = json.loads(args.input.read_text(encoding='utf-8-sig'))
+            overrides = json.loads(args.rankings.read_text(encoding='utf-8-sig')) if args.rankings else None
+            value = search_evaluation.evaluate(snapshot, k=args.k, ranking=args.ranking, overrides=overrides)
+        else:
+            config = load_config(args.config)
+            store = StateStore(search.database(config, args.config))
+            try:
+                if args.command == 'search-history':
+                    value = search_history.recent(store)
+                elif args.command == 'search-export':
+                    value = search_evaluation.export(store, args.search_ids)
+                    if args.ai_tasks:
+                        value = search_evaluation.ai_packet(value)
+                else:
+                    value = {'imported_ai_suggestions': search_evaluation.import_ai(store,
+                        json.loads(args.input.read_text(encoding='utf-8-sig')))}
+            finally:
+                store.close()
+        if getattr(args, 'output', None):
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+            print(f'Saved {args.output}')
+        else:
+            print(json.dumps(value, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == 'serve':
+        from .web import serve
+        return serve(load_config(args.config), args.config, args.port)
     if args.command in ("run", "discover", "evaluate", "test-delivery"):
         import paper_scout
         if not hasattr(args, "venues"):

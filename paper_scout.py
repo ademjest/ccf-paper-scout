@@ -36,7 +36,7 @@ if os.name == "nt":
 else:
     import fcntl
 
-from ccf_paper_scout import discovery, metadata, official_abstracts, proceedings, relations, selection, semantic
+from ccf_paper_scout import discovery, metadata, official_abstracts, proceedings, relations, selection, semantic, sources
 
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#-]{1,}|[\u4e00-\u9fff]{2,}")
 ANALYSIS_SCHEMA_VERSION = 2
@@ -531,7 +531,7 @@ def fetch_dblp_page(
 
 def fetch_dblp_sparql_page(
     venue: dict[str, Any], year: int, limit: int, start: int, user_agent: str, *,
-    timeout: int = 30, attempts: int = 3, minimum_interval_seconds: float = 0.0,
+    timeout: int = 30, attempts: int = 3, minimum_interval_seconds: float = 0.0, request=None,
 ) -> tuple[list[dict[str, Any]], int | None, int]:
     """Fetch one venue/year page from DBLP's machine-oriented SPARQL endpoint."""
     key = str(venue["dblp_key"]).lower()
@@ -566,7 +566,7 @@ OFFSET {max(0, int(start))}
 """.strip()
     params = urllib.parse.urlencode({"query": query, "format": "json"})
     url = DBLP_SPARQL_ENDPOINT + "?" + params
-    payload = request_dblp_json(
+    payload = (request or request_dblp_json)(
         url, user_agent, timeout, attempts, minimum_interval_seconds,
         "application/sparql-results+json",
     )
@@ -1163,11 +1163,17 @@ def render_report(
     failed_sources: list[dict[str, Any]] | None = None,
     quality_summary: dict[str, Any] | None = None,
     *, cached_discovery: bool = False,
+    source_status: dict | None = None,
 ) -> str:
     now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     lines = ["# CCF-A 兴趣论文推荐", "", f"生成时间：{now}", f"兴趣库：{interest_count} 篇；CCF-A 候选：{candidate_count} 篇；本次输出：{len(papers)} 篇。", ""]
     if cached_discovery:
         lines += ["**数据源异常：DBLP 重试后仍超时或临时不可用，本次未完成实时检索。推荐仅从本次扫描开始前已有的缓存候选中筛选，不代表今日新论文；仍执行研究方向、主会资格和已投递去重检查。**", ""]
+    if source_status:
+        labels = {'live': '实时来源已完成本轮预算内检索', 'partial_live': '部分实时来源可用，未完成全部来源检索',
+                  'cached_only': '实时来源未取得可用新记录，本次使用已核验缓存'}
+        lines += [f"**数据覆盖：{labels.get(source_status.get('mode'), '来源状态待确认')}。**", '']
+        lines += ['来源状态：' + '；'.join(f"{name}: {value['status']}" for name, value in source_status.get('providers', {}).items()), '']
     if quality_summary:
         lines += [f"准入统计：{json.dumps(quality_summary, ensure_ascii=False)}", ""]
     if failed_sources:
@@ -1202,7 +1208,7 @@ def render_report(
             f"- Venue：{p['venue']}（CCF-{p['rank']}，{p['year']}，{p['type']}）",
             f"- 作者：{authors}",
             f"- 匹配依据：{reasons}",
-            f"- DBLP：{p['url']}",
+            f"- 论文主页：{p['url']}",
         ]
         if p.get("ee"):
             lines.append(f"- 出版/全文入口：{p['ee']}")
@@ -1283,9 +1289,14 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
                     and dblp_config.get("failure_policy") != "strict" and not args.discover_only and not args.evaluate_only)
     cached_candidates = store.candidates(requested, available_years) if allow_cached else []
     cached_discovery = False
+    multi_source = bool(config.get('sources', {}).get('enabled'))
     try:
-        source_stats, failed_sources = ({"mode": "snapshot"}, []) if args.evaluate_only else discovery.discover(
-            store, {key: venue_by_key[key] for key in requested}, years, dblp_config, user_agent, fetch_dblp_page, probe_year=probe)
+        if multi_source and not args.evaluate_only:
+            source_stats = sources.discover(store, config, [venue_by_key[key] for key in requested], years, run_id)
+            failed_sources = []
+        else:
+            source_stats, failed_sources = ({"mode": "snapshot"}, []) if args.evaluate_only else discovery.discover(
+                store, {key: venue_by_key[key] for key in requested}, years, dblp_config, user_agent, fetch_dblp_page, probe_year=probe)
     except discovery.DiscoveryUnavailableError as exc:
         if not allow_cached or not exc.failures or not all(failure.get("transient") for failure in exc.failures):
             raise
@@ -1306,12 +1317,16 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
         for key, year in failed_partitions)]
     # Recheck eligibility against the current whitelist, including persisted candidates.
     candidate_values = [paper for paper in candidate_values if any(
-        paper["id"].startswith(("conf/" if venue_by_key[key]["type"] == "conference" else "journals/") + key + "/")
-        and paper.get("rank") == "A" for key in requested)]
+        (paper["id"].startswith(("conf/" if venue_by_key[key]["type"] == "conference" else "journals/") + key + "/")
+         or (multi_source and config['sources'].get('mode') == 'production' and paper.get('venue_key') == key
+             and proceedings.official_evidence(paper))) and paper.get("rank") == "A" for key in requested)]
     all_candidates = candidate_values
+    if multi_source:
+        for paper in candidate_values:
+            paper['abstract'] = official_abstracts.usable_abstract(paper.get('abstract', ''))
     qualification_stats = {}
     if config.get("main_conference", {}).get("enabled", True):
-        if not args.evaluate_only and not cached_discovery:
+        if not args.evaluate_only and not cached_discovery and not multi_source:
             qualification_stats["backfill"] = proceedings.backfill(
                 candidate_values, store, config.get("main_conference", {}),
                 lambda ids: lookup_dblp_proceedings(ids, user_agent, dblp_config))
@@ -1324,9 +1339,10 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     topic_priority = dict(config.get("topic_priority", {}))
     title_ranked = apply_topic_priorities(title_ranked, topic_priority)
     print("[5/7] Updating bounded metadata and semantic caches...")
-    metadata_stats = {} if args.evaluate_only else metadata.enrich(
+    metadata_stats = ({"mode": "source_budget", "abstracts_available": sum(bool(p.get('abstract')) for p in title_ranked)}
+                      if multi_source and not args.evaluate_only else {} if args.evaluate_only else metadata.enrich(
         title_ranked, store, config.get("metadata", {}), user_agent,
-        lambda url, agent: json.loads(official_abstracts.fetch(url, agent)), normalize_doi, openalex_abstract)
+        lambda url, agent: json.loads(official_abstracts.fetch(url, agent)), normalize_doi, openalex_abstract))
     print("metadata:", json.dumps(metadata_stats))
     ranked = rank_candidates(interests, title_ranked, config.get("explicit_interests", []))
     ranked = apply_topic_priorities(ranked, topic_priority)
@@ -1403,7 +1419,8 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
         print(f"      LLM translation: {translated_count} API successes, {translation_cache_hits} cache hits")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report = render_report(selected, len(interests), len(candidates), failed_sources,
-                           {"主会资格": qualification_stats, "关系策略": relation_stats}, cached_discovery=cached_discovery)
+                           {"主会资格": qualification_stats, "关系策略": relation_stats}, cached_discovery=cached_discovery,
+                           source_status=source_stats if multi_source and not args.evaluate_only else None)
     atomic_write_text(args.output, report)
     store.record_selection(run_id, selected)
     delivery_config = config.get("delivery", {}).get("smtp", {})

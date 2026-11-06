@@ -17,7 +17,9 @@ def select(papers: list[dict[str, Any]], limit: int, config: dict[str, Any],
     qualified = []
     for paper in papers:
         reason = "qualified"
-        if paper.get("topic_class") not in ("primary", "exploration"):
+        if paper.get('identity_review_pending'):
+            reason = 'identity_review_pending'
+        elif paper.get("topic_class") not in ("primary", "exploration"):
             reason = "outside_research_directions"
         elif semantic_production and paper.get("semantic_deferred"):
             reason = "embedding_pending"

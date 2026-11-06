@@ -7,6 +7,12 @@ import urllib.request
 from html.parser import HTMLParser
 from urllib.parse import urlsplit, urlunsplit
 
+PARSER_VERSION = 'official-abstract-v2'
+
+
+class IdentityMismatch(ValueError):
+    pass
+
 
 def official_url(paper: dict) -> str | None:
     url = urlsplit(str(paper.get("ee", "")))
@@ -26,12 +32,23 @@ def official_url(paper: dict) -> str | None:
         match = re.fullmatch(r"/paper(?:_files/paper)?/(\d{4})/hash/[a-f0-9]+-Abstract(?:-Conference)?\.html", url.path)
         if match and int(match[1]) == paper.get("year"):
             return urlunsplit(("https", "proceedings.neurips.cc", url.path, "", ""))
+    if url.hostname == 'openaccess.thecvf.com' and re.fullmatch(r'/content/[^/]+/html/[^/]+_paper\.html', url.path):
+        return urlunsplit(('https', url.hostname, url.path, '', ''))
+    if url.hostname == 'ojs.aaai.org' and re.fullmatch(r'/index.php/AAAI/article/view/\d+', url.path):
+        return urlunsplit(('https', url.hostname, url.path, '', ''))
     return None
 
 
 def is_bibliographic_placeholder(text: str) -> bool:
     """Reject the observed author + proceedings + year pseudo-abstract shape."""
     return len(text) < 800 and bool(re.search(r"\.\s*Proceedings of .+\.\s*\d{4}\.?\s*$", text, re.I))
+
+
+def usable_abstract(text: str) -> str:
+    text = ' '.join((text or '').split())
+    boilerplate = re.search(r'How to Cite.*(?:More Citation Formats|Issue Vol\.)|'
+                           r'making sure you.re not a bot|<title>just a moment', text, re.I)
+    return text if len(text) >= 80 and not boilerplate and not is_bibliographic_placeholder(text) else ''
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -77,9 +94,11 @@ class PaperHTML(HTMLParser):
             return
         if self.depth:
             self.depth += 1
+            if tag in ('h2', 'h4', 'h5'):
+                self.heading = []
         elif tag in ("h2", "h4", "h5"):
             self.heading = []
-        elif tag in ("div", "p", "span"):
+        elif tag in ("div", "p", "span", "section"):
             classes = set(attrs.get("class", "").split())
             if not self.abstract and (attrs.get("id") == "abstract" or classes & {"abstract", "paper-abstract"} or self.awaiting_abstract):
                 self.depth = 1
@@ -92,26 +111,35 @@ class PaperHTML(HTMLParser):
         if self.depth:
             self.depth -= 1
         if tag in ("h2", "h4", "h5") and self.heading is not None:
-            self.awaiting_abstract = "".join(self.heading).strip().lower() == "abstract"
+            self.awaiting_abstract = not self.depth and "".join(self.heading).strip().lower() == "abstract"
             self.heading = None
 
     def handle_data(self, data):
-        if self.depth:
-            self.abstract.append(data)
-        elif self.heading is not None:
+        if self.heading is not None:
             self.heading.append(data)
+        elif self.depth:
+            self.abstract.append(data)
 
 
-def parse_abstract(document: str, paper: dict) -> str:
+def abstract_fields(parsed: PaperHTML) -> dict:
+    """Use the observed official abstract containers, never generic page descriptions."""
+    text = usable_abstract(''.join(parsed.abstract))
+    return dict(abstract=text, abstract_status='valid' if text else 'missing',
+                abstract_method='container' if text else '',
+                abstract_parser_version=PARSER_VERSION,
+                abstract_diagnostic='' if text else 'no_valid_abstract')
+
+
+def parse_abstract(document: str, paper: dict, *, allow_missing: bool = False) -> str:
     parsed = PaperHTML()
     parsed.feed(document)
     titles = parsed.meta.get("citation_title", [])
     authors = {author_key(a) for a in parsed.meta.get("citation_author", [])}
     if len(titles) != 1 or normalized(titles[0]) != normalized(paper["title"]):
-        raise ValueError("official_title_mismatch")
+        raise IdentityMismatch("official_title_mismatch")
     if not authors.intersection(author_key(a) for a in paper.get("authors", [])):
-        raise ValueError("official_author_mismatch")
-    abstract = " ".join("".join(parsed.abstract).split())
-    if len(abstract) < 80:
+        raise IdentityMismatch("official_author_mismatch")
+    abstract = abstract_fields(parsed)['abstract']
+    if len(abstract) < 80 and not allow_missing:
         raise ValueError("official_abstract_missing")
-    return abstract
+    return usable_abstract(abstract)

@@ -19,7 +19,10 @@ def qualify(paper: dict[str, Any], catalog: dict[str, Any]) -> str:
     paper.update(track="unknown", main_conference_status="unresolved", verification_source="", exclusion_reason="unknown_proceedings", qualification_version=catalog["version"])
     identifier = paper.get("proceedings_id", "")
     entry = catalog["volumes"].get(identifier)
-    if not entry or entry["year"] != paper.get("year") or not paper["id"].startswith("conf/" + entry["venue"] + "/"):
+    proof = official_evidence(paper)
+    if proof:
+        entry = dict(venue=proof['venue_key'], year=proof['year'], status='verified', track=proof['track'], source=proof['volume_url'])
+    if not entry or entry["year"] != paper.get("year") or (not proof and not paper["id"].startswith("conf/" + entry["venue"] + "/")):
         return "unresolved"
     paper["verification_source"] = entry["source"]
     paper["track"] = entry["track"]
@@ -45,6 +48,34 @@ def qualify(paper: dict[str, Any], catalog: dict[str, Any]) -> str:
                                  re.search(r"\b(?:this|the present) (?:paper|work|article) (?:is|presents|provides) (?:an? )?tutorial\b|\b(?:in this|this|our) tutorial\b", paper.get("abstract", ""), re.I)):
         paper.update(main_conference_status="excluded", exclusion_reason="non_research_content")
     return paper["main_conference_status"]
+
+
+def official_evidence(paper: dict) -> dict | None:
+    from urllib.parse import urlsplit
+    from .source_adapters import catalog
+    from .identity import url
+    rules = catalog()
+    for proof in paper.get('publication_evidence', []):
+        if proof.get('kind') != 'official_volume_membership' or proof.get('rule_version') != rules['version']:
+            continue
+        if not re.fullmatch(r'[a-f0-9]{64}', proof.get('content_hash', '')):
+            continue
+        if url(proof.get('paper_url')) not in {url(paper.get('url')), url(paper.get('ee'))}:
+            continue
+        for volume in rules['volumes']:
+            if any(proof.get(a) != volume.get(b) for a, b in [('source','source'), ('volume_url','url'), ('venue_key','venue'), ('year','year'), ('track','track')]):
+                continue
+            if paper.get('year') != volume['year'] or paper.get('venue_key') != volume['venue']:
+                continue
+            parsed = urlsplit(proof['paper_url'])
+            if parsed.hostname != urlsplit(volume['url']).hostname:
+                continue
+            if not (re.fullmatch(volume['path_pattern'], parsed.path) or re.fullmatch(volume['path_pattern'], parsed.path + '/')):
+                continue
+            if proof.get('entry_track', '') != volume.get('entry_track', ''):
+                continue
+            return proof
+    return None
 
 
 def backfill(papers: list[dict[str, Any]], store: Any, settings: dict[str, Any], lookup: Callable) -> dict[str, int]:

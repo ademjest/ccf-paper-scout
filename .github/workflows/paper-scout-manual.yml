@@ -141,6 +141,8 @@ jobs:
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.SEMANTIC_SCHOLAR_API_KEY }}
+          CROSSREF_MAILTO: ${{ vars.CROSSREF_MAILTO }}
         run: ccf-paper-scout run --config config.action.json --output recommendations.md --no-update-seen
       - name: Discover without delivery
         if: inputs.mode == 'discover'
@@ -170,6 +172,8 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.SEMANTIC_SCHOLAR_API_KEY }}
+          CROSSREF_MAILTO: ${{ vars.CROSSREF_MAILTO }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
           PAPER_SCOUT_DELIVERY_GATE: .runtime-state/state/.delivery-approved
         run: |
