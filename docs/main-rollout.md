@@ -73,6 +73,19 @@ shadow 下实际邮件仍由词项排序及质量门槛决定，语义只提供�
 
 Actions 会显示每次重试的原因、各失败分区的请求位置及保留游标。扫描失败但状态保存成功时，无需清空 SQLite、已投递记录或扫描游标。上线修复后，重新 **Run workflow** 才使用新代码；旧运行的 **Re-run jobs** 使用旧提交。
 
+## 私有状态仓库恢复失败
+
+如果 `Restore private state` 的克隆步骤失败，并出现 `could not read Username for 'https://github.com'`，说明 Git 无法完成认证。先检查这一步，而不是最后的状态保存步骤。旧工作流在恢复失败后仍执行 `always()` 保存，会额外报 `.runtime-state: No such file or directory`；修复后只有恢复和核验全部成功才允许保存。恢复成功而后续推荐/投递失败时仍尝试保存已有状态。
+
+按以下步骤处理认证问题：
+
+1. 在代码仓库 **Settings → Secrets and variables → Actions → Variables** 确认 `STATE_REPO` 是现有私有状态仓库的 `owner/repository`，不带 URL 前缀或 `.git` 后缀。
+2. 在个人 **Settings → Developer settings → Personal access tokens → Fine-grained tokens** 检查令牌到期时间、资源所有者和仓库范围。需要时创建新令牌：只选择原私有状态仓库，Repository permissions 的 **Contents** 设为 **Read and write**。组织仓库还需满足组织审批/授权要求。
+3. 回到代码仓库的 **Actions → Secrets**，编辑 Repository secret `STATE_REPO_TOKEN`，替换为新令牌。不要把令牌贴到日志、Issue 或聊天中。Secret 名字存在不等于值仍然有效。
+4. 合并工作流修复后，从 **Paper Scout Manual → Run workflow** 选择 `main`、`mode=preview`，验证恢复、推荐和私有报告保存，再恢复正常 Daily。单独 `doctor` 模式不会克隆状态仓库，不能验证这个问题。旧运行的 **Re-run jobs** 不会使用工作流的新提交。
+
+这个错误不需要创建空状态目录、删除 `.delivery-pending`、重建私有仓库或重置历史。恢复不了既有历史时应停止投递，避免把已投递论文当成新论文。
+
 ## 历史保留与回退
 
 升级会增加候选、摘要、向量等表，并扩展扫描状态，不会清空历史投递。首次可能因扫描签名变化而重新索引；这是补齐候选，不是重发历史论文。

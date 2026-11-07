@@ -92,13 +92,21 @@ jobs:
           git rev-parse HEAD
           python -c 'import paper_scout; print(paper_scout.__file__)'
       - name: Restore private state
+        id: restore_state
         if: inputs.mode == 'preview' || inputs.mode == 'production' || inputs.mode == 'discover' || inputs.mode == 'evaluate'
         env:
           STATE_REPO: ${{ vars.STATE_REPO }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         run: |
+          if [ -z "$STATE_REPO" ] || [ -z "$STATE_REPO_TOKEN" ]; then
+            echo "::error::Configure the STATE_REPO variable and STATE_REPO_TOKEN secret before restoring private state."
+            exit 2
+          fi
           basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
-          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" clone "https://github.com/${STATE_REPO}.git" .runtime-state
+          if ! GIT_TERMINAL_PROMPT=0 git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" clone "https://github.com/${STATE_REPO}.git" .runtime-state; then
+            echo "::error::Private state clone failed. Check the STATE_REPO path, STATE_REPO_TOKEN expiry and repository Contents read/write access, and the Git error above. Delivery will not run without restored history."
+            exit 1
+          fi
           git -C .runtime-state remote set-url origin "https://github.com/${STATE_REPO}.git"
           python scripts/actions_state.py prepare --dir .runtime-state/state
           python scripts/actions_state.py verify --dir .runtime-state/state
@@ -190,7 +198,7 @@ jobs:
           fi
           wait "$scout_pid"
       - name: Persist production state
-        if: (inputs.mode == 'production' || inputs.mode == 'discover') && always()
+        if: always() && steps.restore_state.outcome == 'success' && (inputs.mode == 'production' || inputs.mode == 'discover')
         env:
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         working-directory: .runtime-state
