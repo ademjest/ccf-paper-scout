@@ -10,24 +10,29 @@ on:
         default: doctor
         options: [doctor, smtp-test, discover, evaluate, preview, production, research]
       semantic_mode:
-        description: Embedding mode (production requires private calibration.json)
+        description: Embedding mode; configured uses repository variables
         type: choice
-        default: 'off'
-        options: ['off', shadow, production]
+        default: configured
+        options: [configured, 'off', shadow, production]
       max_results:
         description: Maximum recommendations for preview/production
         required: true
         default: '10'
       relation_mode:
-        description: LLM/RL role policy (shadow compares only; production enforces evidence gates)
+        description: LLM/RL role policy; use off for other research fields
         type: choice
-        default: shadow
-        options: [shadow, production]
+        default: configured
+        options: [configured, 'off', shadow, production]
       research_profile:
-        description: Interest profile for preview, evaluate and production
+        description: Research profile; configured uses repository variables
         type: choice
-        default: rl-action-world-models
-        options: [legacy, rl-action-world-models]
+        default: configured
+        options: [configured, legacy, rl-action-world-models, custom]
+      interest_source:
+        description: Interest source; manual does not require Zotero
+        type: choice
+        default: configured
+        options: [configured, manual, zotero]
 
 permissions:
   contents: read
@@ -86,7 +91,7 @@ jobs:
       - uses: ./.github/actions/setup-semantic
         if: inputs.mode == 'preview' || inputs.mode == 'evaluate' || inputs.mode == 'production'
         with:
-          mode: ${{ inputs.semantic_mode }}
+          mode: ${{ inputs.semantic_mode != 'configured' && inputs.semantic_mode || vars.SEMANTIC_MODE || 'off' }}
       - name: Record runtime version
         run: |
           git rev-parse HEAD
@@ -117,24 +122,30 @@ jobs:
         env:
           REQUESTED_MAX_RESULTS: ${{ inputs.max_results }}
           REQUESTED_MODE: ${{ inputs.mode }}
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_USE_SSL: ${{ vars.SMTP_USE_SSL }}
+          LLM_ENABLED: ${{ vars.LLM_ENABLED }}
           SMTP_SENDER: ${{ secrets.SMTP_SENDER }}
           SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          SEMANTIC_MODE: ${{ inputs.semantic_mode }}
-          RELATION_MODE: ${{ inputs.relation_mode }}
-          RESEARCH_PROFILE: ${{ inputs.research_profile }}
+          SEMANTIC_MODE: ${{ inputs.semantic_mode != 'configured' && inputs.semantic_mode || vars.SEMANTIC_MODE || 'off' }}
+          RELATION_MODE: ${{ inputs.relation_mode != 'configured' && inputs.relation_mode || vars.RELATION_MODE || 'shadow' }}
+          INTEREST_SOURCE: ${{ inputs.interest_source != 'configured' && inputs.interest_source || vars.INTEREST_SOURCE }}
+          RESEARCH_PROFILE: ${{ inputs.research_profile != 'configured' && inputs.research_profile || vars.RESEARCH_PROFILE || 'legacy' }}
         run: |
           case "$REQUESTED_MAX_RESULTS" in (*[!0-9]*|'') echo "max_results must be an integer"; exit 2;; esac
           if [ "$REQUESTED_MAX_RESULTS" -lt 1 ] || [ "$REQUESTED_MAX_RESULTS" -gt 20 ]; then echo "max_results must be 1..20"; exit 2; fi
           EXTRA=""
-          if [ "$REQUESTED_MODE" != "production" ]; then EXTRA="--disable-smtp"; fi
+          case "$REQUESTED_MODE" in preview|evaluate|discover) EXTRA="--disable-smtp";; esac
           python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results "$REQUESTED_MAX_RESULTS" $EXTRA
       - name: Doctor
         if: inputs.mode == 'doctor'
         env:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: ccf-paper-scout doctor --config config.action.json
       - name: SMTP test

@@ -52,12 +52,17 @@ jobs:
           python scripts/actions_state.py verify --dir .runtime-state/state
       - name: Build ephemeral config
         env:
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_USE_SSL: ${{ vars.SMTP_USE_SSL }}
+          LLM_ENABLED: ${{ vars.LLM_ENABLED }}
           SMTP_SENDER: ${{ secrets.SMTP_SENDER }}
           SMTP_RECEIVER: ${{ secrets.SMTP_RECEIVER }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           SEMANTIC_MODE: ${{ vars.SEMANTIC_MODE || 'off' }}
           RELATION_MODE: ${{ vars.RELATION_MODE || 'shadow' }}
+          INTEREST_SOURCE: ${{ vars.INTEREST_SOURCE }}
           RESEARCH_PROFILE: ${{ vars.RESEARCH_PROFILE || 'legacy' }}
         run: python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results 5
       - name: Verify generated runtime config
@@ -67,6 +72,7 @@ jobs:
         env:
           ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
           ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: ccf-paper-scout doctor --config config.action.json
       - name: Check unresolved delivery transaction

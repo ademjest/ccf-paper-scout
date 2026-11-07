@@ -1226,9 +1226,13 @@ def render_report(
 
 def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     user_agent = config.get("user_agent", "ccf-paper-scout/0.1")
-    print(f"[1/7] Loading interest corpus from {'local JSON' if args.interests else 'Zotero Web API'}...")
-    interests = [] if args.discover_only else load_json(args.interests) if args.interests else fetch_zotero(config, user_agent)
-    if args.discover_only or args.interests:
+    source = config.get('interest_source', 'zotero')
+    local_interests = bool(args.interests) or source == 'manual'
+    label = 'local JSON' if args.interests else 'manual research profile' if source == 'manual' else 'Zotero Web API'
+    print(f"[1/7] Loading interests from {label}...")
+    interests = ([] if args.discover_only else load_json(args.interests) if args.interests else
+                 [] if source == 'manual' else fetch_zotero(config, user_agent))
+    if args.discover_only or local_interests:
         zotero_identity_papers = interests
     else:
         dedup_cap = int(config.get("zotero_dedup_items", 0))
@@ -1236,7 +1240,7 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
             config, user_agent, cap_override=dedup_cap, use_collection_filter=False
         )
     print(
-        f"      Loaded {len(interests)} interest papers and {len(zotero_identity_papers)} Zotero items for dedup; "
+        f"      Loaded {len(interests)} interest papers and {len(zotero_identity_papers)} library items for dedup; "
         f"explicit directions: {', '.join(config.get('explicit_interests', [])) or '(none)'}"
     )
     debug_config = config.get("debug", {})
@@ -1334,7 +1338,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     candidates = {paper["id"]: paper for paper in candidate_values}
     print(f"[3/7] Persistent eligible candidates: {len(candidates)}; discovery={json.dumps(source_stats)}")
     # A title-only first pass decides which candidates deserve metadata API calls.
-    print("[4/7] Ranking by titles, Zotero corpus and explicit interests...")
+    print("[4/7] Ranking by titles, reference papers and explicit interests...")
     title_ranked = rank_candidates(interests, candidate_values, config.get("explicit_interests", []))
     topic_priority = dict(config.get("topic_priority", {}))
     title_ranked = apply_topic_priorities(title_ranked, topic_priority)
@@ -1474,7 +1478,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config.json"))
-    parser.add_argument("--interests", type=Path, help="local JSON list; otherwise use Zotero Web API")
+    parser.add_argument("--interests", type=Path, help="local reference-paper JSON list; overrides configured interest source")
     parser.add_argument("--venues", type=Path, default=Path(__file__).parent / "data/ccf_a_venues.json")
     parser.add_argument("--output", type=Path, default=Path("recommendations.md"))
     parser.add_argument("--no-update-seen", action="store_true")

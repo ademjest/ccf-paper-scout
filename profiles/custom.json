@@ -1,0 +1,24 @@
+{
+  "explicit_interests": [
+    "retrieval augmented generation",
+    "document retrieval",
+    "evidence grounded question answering"
+  ],
+  "discovery_queries": [
+    "retrieval augmented generation evidence retrieval",
+    "document retrieval question answering"
+  ],
+  "research_profile": {
+    "directions": [
+      {
+        "name": "retrieval augmented generation",
+        "description": "Retrieving relevant documents and passages to improve factual question answering with language models, including evidence selection, reranking and grounded generation."
+      }
+    ]
+  },
+  "topic_priority": {
+    "primary_topics": ["retrieval augmented generation", "document retrieval", "question answering"],
+    "exploration_topics": [],
+    "max_exploration_results": 0
+  }
+}

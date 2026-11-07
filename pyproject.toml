@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ccf-paper-scout"
 version = "0.2.0"
-description = "Low-resource Zotero-driven CCF-A paper scout"
+description = "Personal research-profile or Zotero-driven paper search and recommendations"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
