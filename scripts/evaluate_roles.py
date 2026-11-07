@@ -22,7 +22,7 @@ def evaluate(diagnostic: dict, labels: list[dict]) -> dict:
                 label.get("eligibility") not in ("verified", "excluded", "unresolved") or
                 type(label.get("wanted")) is not bool or type(label.get("substantial_marl")) is not bool or
                 not isinstance(label.get("relations"), list) or any(value not in PROTOTYPES for value in label["relations"])):
-            raise ValueError("invalid/duplicate human label; see docs/main-conference-and-relations-implementation.md")
+            raise ValueError("invalid/duplicate human label; see docs/offline-benchmark.md")
         seen.add(label["id"])
         paper = papers.get(label["id"])
         if not paper:

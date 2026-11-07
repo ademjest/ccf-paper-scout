@@ -2,13 +2,13 @@
 
 目标：先确认跨会议摘要覆盖与排序差异，再由人工标签决定是否更换推荐算法。此流程仅面向单个固定兴趣画像，不等同于多查询搜索评测或大规模个性化推荐评测。
 
-## 本轮范围
+## 实验范围
 
 - AAAI、ACL、ICML、NeurIPS，固定 2025 年；每分区最多 3 页、每页 100 条，总预算 12 页。
 - 继续使用现有主会核验清单；ICLR 尚未纳入。前几页按 DBLP ID 排列，不代表完整会议或随机样本。
 - 独立目录保存数据、向量和输出，不读生产数据库或私人文库，不发邮件，不调用生成式模型。
 - 研究画像沿用示例配置的 RL、MARL、LLM-assisted RL；语义和关系策略均为 shadow。
-- 新的官方摘要获取和会议轮询仅在实验工具中使用。尚未接入每日邮件流程；不会自动改变现有推荐策略。
+- 实验的固定候选池和轮询预算独立于每日流程，不会自动改变现有推荐策略。
 
 ## 1. 采集候选
 
@@ -27,7 +27,7 @@ $env:PYTHONUTF8 = '1'
 .\.venv\Scripts\python.exe .\scripts\benchmark_papers.py prepare --candidates .\local-notes\my-benchmark\collection\candidates.json --output .\local-notes\my-benchmark\evidence --budget 100
 ```
 
-前提：已安装项目的 semantic 可选依赖，固定版本的 BGE 模型位于项目 `.model-cache` 中。当前机器已满足。脚本开启 Hugging Face 离线模式，模型缺失时会报错，不会悄悄下载或更换模型。
+前提：已安装项目的 semantic 可选依赖，固定版本的 BGE 模型位于项目 `.model-cache` 中。脚本开启 Hugging Face 离线模式，模型缺失时会报错，不会悄悄下载或更换模型。
 
 处理过程：
 
@@ -65,7 +65,7 @@ $env:PYTHONUTF8 = '1'
 
 ## 4. 人工需要做什么
 
-本轮真正需要人的环节是研究兴趣判断，不是安装权限或配置密钥。
+需要人的环节是研究兴趣判断，不是安装权限或配置密钥。
 
 1. 双击 `annotate.html`，使用 Edge 或 Chrome 打开；不需启动服务器。
 2. 先统一标准：0 不相关、1 部分相关、2 高度相关。证据不足选“待确认”，不当成负例。
@@ -102,3 +102,69 @@ $env:PYTHONUTF8 = '1'
 ```
 
 本轮在 Windows 验证。Linux 仍需由仓库 CI 执行，不能把本地测试当成已通过远端 CI。标注页面本地保存与导入导出已用独立无界面 Edge 做操作检查；自动化检查使用的合成标签不属于人工标签，不得用于效果评估。
+
+## Daily 语义排序的正式校准
+
+标签文件为私有 JSON 对象，键为 DBLP ID，值必须是布尔值。校准集与独立测试集的 ID 不可重叠；不要把未知标签视为负例。
+
+```json
+{
+  "conf/aaai/EXAMPLE_POSITIVE": true,
+  "conf/aaai/EXAMPLE_NEGATIVE": false
+}
+```
+
+以上 ID 仅示范格式，不能用于实际质量评价。使用 shadow 生成的 diagnostics 进行校准提案：
+
+```bash
+python scripts/evaluate_recommendations.py \
+  --diagnostics /private/recommendations-evaluation.diagnostics.json \
+  --labels /private/calibration-labels.json \
+  --test-labels /private/heldout-labels.json \
+  --calibrate \
+  --target-precision 0.8 \
+  --output /private/calibration-proposal.json
+```
+
+脚本为含摘要和仅标题两类分别搜索门槛，每类至少需要 3 个正例和 3 个负例；该数量只是最小运行条件，正式建议仍为至少 60 篇标注。提案默认为 `approved=false`。审查独立测试结果、数量与覆盖率后，再显式改为 true，并存入私有状态仓库 `state/calibration.json`。
+
+Actions 自动从该文件加载校准。模型 revision、分块策略、方向描述、Zotero 参考集合或相关权重发生变化时，校准匹配检查会失效，须重新评估。首次上线建议限制参与画像的 Zotero collection，减少研究方向以外文献的干扰。
+
+语义分数是方向与较弱参考信号的组合，不是相关性概率。阈值脚本报告的是标注候选范围内的表现，不代表全库真实召回率；不使用未标注论文虚构指标。自动提案不会自动启用生产。
+
+
+## LLM/RL 关系标签与校准
+
+从影子报告抽取独立样本，分别标注出版资格、关系、实质 MARL 和是否希望收到。校准集与留出测试集使用两个文件，不能用同一批反复选阈值再报告最终准确率。
+
+人工标签文件格式（以下 ID 是格式占位符，不是真实论文判定）：
+
+```json
+[
+  {
+    "id": "conf/venue/replace-with-real-record",
+    "eligibility": "verified",
+    "relations": ["llm_for_rl"],
+    "substantial_marl": false,
+    "wanted": true
+  }
+]
+```
+
+```bash
+python scripts/evaluate_roles.py --diagnostics recommendations.diagnostics.json --labels role-test-labels.json
+```
+
+工具报告有标签选文相关性、关系混淆、主会误放行、MARL 误排除／暂缓和未覆盖标签数量；未标注记录不自动当负例，也不会自动生成“approved”。请保存在私有目录，不提交个性化标签到公开仓库。现有 `evaluation-labels.json` 的 true/false 格式不变，仍服务原有相关性评估。
+
+关系阈值文件为私有 `state/relation-calibration.json`，已加入状态文件白名单：
+
+```json
+{
+  "approved": false,
+  "relation_signature": "复制本次 diagnostics 的 semantic.relations.signature",
+  "thresholds": {"positive": 0.0, "margin": 0.1}
+}
+```
+
+上述数值**只是结构示例，不是可用默认阈值**。在人工校准前不要创建这个文件；只有根据校准样本选定阈值并通过独立留出检查后，才填写实际数值并将 approved 设为布尔 true。错误批准值、旧模型／原型签名和非法数值会报错，而不是静默降级。
