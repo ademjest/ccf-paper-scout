@@ -1,17 +1,17 @@
 # GitHub Actions 研究画像实验
 
-`Paper Scout Manual` 新增 `research` 模式，运行 `scripts/research_experiment.py`。画像位于 `profiles/rl-action-world-models.json`，包括行动／规划策略、世界模型、LLM 辅助 RL、VLM 行动策略和自博弈。模仿学习可作为主要兴趣，普通 MARL 不再作为独立主要语义方向。
+`Paper Scout Manual` 提供 `research` 模式，运行 `scripts/research_experiment.py`。画像位于 `profiles/rl-action-world-models.json`，包括行动／规划策略、世界模型、LLM 辅助 RL、VLM 行动策略和自博弈。模仿学习可作为主要兴趣，普通 MARL 不再作为独立主要语义方向。
 
-## 从 update-paper 分支运行
+## 从自己的仓库运行
 
-此分支尚未合并到默认分支时，Actions 网页可能仍展示默认分支的旧输入选项。可以用 GitHub CLI 明确指定已存在的工作流文件、目标分支和模式：
+进入 **Actions → Paper Scout Manual → Run workflow**，选择包含该功能的默认分支（通常为 `main`）和 `research` 模式。此模式使用内置 RL 实验画像，不读取 `profiles/custom.json`；自己的兴趣推荐请使用 preview。
+
+也可在自己的本地仓库目录中执行 GitHub CLI（先通过 `gh auth login` 登录）：
 
 ```bash
-gh workflow run paper-scout-manual.yml --repo ademjest/ccf-paper-scout --ref update-paper --field mode=research
-gh run list --repo ademjest/ccf-paper-scout --workflow paper-scout-manual.yml --branch update-paper --limit 5
+gh workflow run paper-scout-manual.yml --ref main --field mode=research
+gh run list --workflow paper-scout-manual.yml --branch main --limit 5
 ```
-
-GitHub CLI 需先通过 `gh auth login` 登录具备仓库 Actions 运行权限的账号。网页若已显示新选项，也可以进入 **Actions → Paper Scout Manual → Run workflow**，选择 `update-paper` 分支和 `research` 模式。
 
 实验结束后，在该次运行页面的 **Artifacts** 下载 `research-experiment-<run-id>`，解压并打开 `results.html`。其中有原画像、新画像各自的 lexical、semantic、RRF Top 20，标题可展开摘要。JSON 同时保留候选、核验结果、请求失败原因、冻结快照、完整排序和回放验证。
 
@@ -26,7 +26,7 @@ GitHub CLI 需先通过 `gh auth login` 登录具备仓库 Actions 运行权限�
 - 云端每次重新采集公开候选，不携带本地历史候选池。因此数量和名次可能与本地 176 篇实验不同，不能直接混比。来源不完整则保留诊断产物并使工作流失败。
 - 无人工标签，不输出准确率或 nDCG。关键词和向量相似仍可能混淆“环境行动策略”与“语言模型回答优化”，尚未实现下一阶段的任务角色重排。
 
-每日定时工作流仍按原配置执行。GitHub 的 schedule 使用默认分支，推送到 `update-paper` 不会自动让默认分支定时任务使用该分支的新代码；需要后续明确合并和配置生产部署。此次提供的研究画像也没有批准生产阈值。
+该实验不修改 Daily 配置，也不批准生产阈值。GitHub 的 schedule 始终使用默认分支。
 
 ## Windows 本地运行
 

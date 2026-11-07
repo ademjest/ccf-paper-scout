@@ -36,6 +36,10 @@ Fork 本项目，后续配置都在你自己的 Fork 中完成，不要使用原
 
 `RESEARCH_PROFILE=custom` 使用这个文件；`legacy` 使用 `config.example.json` 的兴趣；`rl-action-world-models` 是项目内置的 RL 画像。私有研究方向不应提交到公开 Fork，可使用私有代码仓库或本地私有配置。
 
+下图是 `profiles/custom.json` 的完整内容示例，展示 RAG 方向的写法。请按自己的研究问题修改；只填写上面的最简内容也可以。
+
+![自定义兴趣文件示例：关键词、检索词、方向描述与主题优先级](../images/profiles-custom.png)
+
 ## 3. 创建私有状态仓库
 
 在自己的账号下创建 **Private** 仓库，例如 `paper-scout-state`，勾选添加 README，让仓库至少有一个提交，并确认默认分支为 **main**。当前状态推送目标固定为 main。
@@ -50,6 +54,10 @@ Fork 本项目，后续配置都在你自己的 Fork 中完成，不要使用原
 - Expiration：按需要设置有效期，记住到期前更换；组织仓库还需要相应审批。
 
 生成后的值保存到代码仓库 Secret `STATE_REPO_TOKEN`。名称相同不代表两个账号共享令牌；Fork 不会复制原作者的 Secrets。不要截取或公开令牌值。
+
+下图是已有 **Classic token** 的管理页，展示有效期与 `repo` 权限，**不是 Fine-grained 的权限配置页**。新用户按上面的步骤选择左侧 **Fine-grained tokens**，只授权自己的状态仓库；已有 Classic 用户可在此检查是否过期，更新后还需替换 `STATE_REPO_TOKEN`。
+
+![Classic token 管理页：令牌名称、repo 权限和到期时间，不含令牌值](../images/access-token.png)
 
 ## 4. 配置 Variables
 
@@ -68,11 +76,17 @@ Fork 本项目，后续配置都在你自己的 Fork 中完成，不要使用原
 
 不配置 `INTEREST_SOURCE` 时沿用 `config.example.json`，仓库示例为 `zotero`，这是为已有用户保留的兼容默认值。无 Zotero 用户需要明确设置 `manual`。
 
+下图用于定位 **Variables** 页和 **New repository variable** 按钮。图中是作者的 RL 配置，**请使用上表的无 Zotero 配置，不要照抄图中的值**：将 `RESEARCH_PROFILE` 设为 `custom`、两种模式设为 `off`，补充 `INTEREST_SOURCE=manual` 和 `LLM_ENABLED=false`，并把 `STATE_REPO` 改为自己的仓库。
+
+![Actions Variables 设置位置；图中为作者原有 RL 配置](../images/variables.png)
+
 ## 5. 先做不发邮件的预览
 
 此时只需 `STATE_REPO_TOKEN`，暂时不用配置邮箱、Zotero 或 LLM Secrets。
 
 Actions → Paper Scout Manual → Run workflow：选择默认分支，`mode=preview`，其余模式选项保持 `configured`，`max_results=5`。
+
+<img src="../images/manual.png" alt="Manual 预览表单：preview、configured 与 max_results=5" width="460">
 
 检查：
 
@@ -92,6 +106,10 @@ Actions → Paper Scout Manual → Run workflow：选择默认分支，`mode=pre
 | `SMTP_SENDER` | 发件邮箱地址，同时用于 SMTP 登录 |
 | `SMTP_RECEIVER` | 收件邮箱地址 |
 | `SMTP_PASSWORD` | 邮箱提供商的 SMTP 授权码/应用密码 |
+
+下图用于定位 **Secrets** 页和 **New repository secret** 按钮，只显示名称，不显示密钥值。无 Zotero、关闭 LLM 时，基础部署只需 `STATE_REPO_TOKEN` 和上面三个 SMTP Secrets；图中其他名称无需照建，`PAPER_SCOUT_PROFILE_JSON` 也不是当前工作流的配置入口，兴趣请写入 `profiles/custom.json`。
+
+![Actions Secrets 设置位置，仅展示名称；无 Zotero 部署无需创建图中全部条目](../images/secrets.png)
 
 在 **Variables** 页配置服务器：
 
@@ -129,14 +147,11 @@ Actions → Paper Scout Daily → Enable workflow。Daily 自动使用仓库 Var
 
 无 Zotero 模式保留邮件投递历史去重；无法自动获知你在其他工具里收藏或读过的论文。
 
-## 截图说明
+## 部署完成检查
 
-仅按文字步骤即可部署，无需提供截图才能完成。若制作带图教程，可补充以下页面；截图不应包含令牌、授权码或其他 Secret 值：
+- 兴趣文件已提交，Variables 指向自己的画像和私有状态仓库。
+- Preview 日志显示自己的关键词，私有仓库中能够打开预览报告。
+- SMTP 测试邮件已收到，首次 production 的邮件和状态保存均成功。
+- Daily 已启用，状态令牌尚未过期。
 
-1. 编辑 `profiles/custom.json` 的页面，展示一组公开示例兴趣。
-2. Actions Variables 列表，展示上述变量名与公开示例值；个人信息按需遮挡。
-3. Actions Secrets 列表，只展示名称。
-4. Fine-grained token 的仓库范围与 Contents Read and write 权限页，**不截生成后的令牌页面**。
-5. Manual Run workflow 表单，展示 preview 和 configured 选项；成功运行的步骤列表可作为另一张图。
-
-与状态恢复、令牌过期有关的故障处理见 [main 升级与恢复指南](main-rollout.md)。不要通过清空状态库解决认证问题。
+以上截图用于说明页面位置和操作方式；配置值以本文表格及自己的仓库、兴趣和邮箱为准。无需提供额外截图才能部署。与状态恢复、令牌过期有关的故障处理见 [Daily 运维与恢复指南](main-rollout.md)，不要通过清空状态库解决认证问题。

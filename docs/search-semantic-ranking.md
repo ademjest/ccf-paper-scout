@@ -40,14 +40,14 @@ CLI 为兼容已有脚本默认仍是关键词模式，可显式指定：
 }
 ```
 
-相对模型缓存路径以服务启动目录为准；从其他目录运行时请改用绝对路径。当前电脑已有依赖及模型。其他电脑需安装项目的 `semantic` 可选依赖，并预先下载固定版本模型：
+相对模型缓存路径以服务启动目录为准；从其他目录运行时请改用绝对路径。首次使用需安装项目的 `semantic` 可选依赖，并预先下载固定版本模型：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install ".[semantic]" -c constraints-semantic.txt
 .\.venv\Scripts\python.exe -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5', revision='5c38ec7c405ec4b44b94cc5a9bb96e735b38267a', device='cpu', trust_remote_code=False, cache_folder='.model-cache/hub')"
 ```
 
-交互搜索强制只加载本地模型，不自动下载、不调用付费 embedding API。模型或依赖不可用时回退关键词，并在页面明示。每次默认最多新计算 500 篇，优先有摘要的记录；既有向量不占新计算预算。超额候选会显示待计算数量，不能把部分覆盖理解为全库语义搜索，后续搜索继续补算。当前库尚未达到这个预算。
+交互搜索强制只加载本地模型，不自动下载、不调用付费 embedding API。模型或依赖不可用时回退关键词，并在页面明示。每次默认最多新计算 500 篇，优先有摘要的记录；既有向量不占新计算预算。超额候选会显示待计算数量，不能把部分覆盖理解为全库语义搜索，后续搜索继续补算。
 
 ## API 和评测
 

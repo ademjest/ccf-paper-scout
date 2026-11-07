@@ -38,9 +38,7 @@ GitHub Actions
 
 LLM 不参与 CCF-A 出版资格判断和去重。关系复核与最终中文卡片分开，每轮最多审核 20 篇边界候选，要求摘要原句证据。Daily 的 CPU embedding 默认关闭，可先使用 shadow 模式评估；正式接管兴趣排序需要匹配模型与画像的人工审查校准，关系原型另有独立的校准版本。
 
-主会与 LLM／RL 关系升级的范围、保守暂缓边界及 Actions 测试步骤见 [实施与审查说明](docs/main-conference-and-relations-implementation.md)。
-
-`update-paper` 的实施内容、迁移方法、测试结果和 Actions 启用步骤见 [部署说明](docs/update-paper-implementation.md)。原始设计见 [优化方案](docs/recommendation-quality-and-discovery-plan.md)。
+部署、更新和来源异常处理见 [Daily 运维与恢复指南](docs/main-rollout.md)；需要启用正式语义排序时，先完成 [离线评测与校准](docs/offline-benchmark.md)。
 
 ## 网页搜索：快速开始
 
@@ -101,11 +99,11 @@ ccf-paper-scout serve --config config.example.json
 .\.venv\Scripts\ccf-paper-scout.exe search --config config.example.json --query "world model planning" --ranking hybrid --require-abstract
 ```
 
-来源状态、Windows 命令、预算配置、真实测试结果及上线限制见 [多来源实施说明](docs/multi-source-implementation.md)。完整设计见 [升级方案](docs/multi-source-upgrade-plan.md)。
+来源预算、凭据配置和异常恢复见 [Daily 运维与恢复指南](docs/main-rollout.md)。
 
 “反馈数据与评估（可选）”支持导出查询反馈和 AI 协作任务。人工与 AI 标签分开保存，独立测试样本不进入 AI 待标注包；可对固定结果快照重跑评测。操作步骤与指标边界见 [搜索反馈与评测说明](docs/search-feedback-and-evaluation.md)。
 
-来源抓取支持逐篇恢复、摘要身份核对和响应缓存，区分访问失败与预算耗尽。单篇异常不会直接丢弃整个目录进度，来源失败时仍可展示已取得的本地结果；见 [抓取可靠性实施记录](docs/source-fetch-reliability-implementation.md)。
+来源抓取支持逐篇恢复、摘要身份核对和响应缓存，区分访问失败与预算耗尽。单篇异常不会直接丢弃整个目录进度，来源失败时仍可展示已取得的本地结果。
 
 ## 环境要求
 
@@ -204,8 +202,8 @@ DBLP Search API 可能对云端出口返回 HTTP 200 的反机器人 HTML 页面
 
 当前多来源流程保留其他来源和已有缓存的合格候选，并在报告中注明来源异常。仅使用旧 DBLP
 发现流程时，`minimum_success_ratio` 仍检测异常；示例配置允许临时故障时使用缓存，严格模式
-则停止运行。缓存候选仍需通过原有资格、相关性和去重检查。详细设计和恢复步骤见
-[`docs/dblp-resilience-improvement.md`](docs/dblp-resilience-improvement.md)。
+则停止运行。缓存候选仍需通过原有资格、相关性和去重检查。故障处理见
+[Daily 运维与恢复指南](docs/main-rollout.md)。
 
 ## 本地命令
 
@@ -221,7 +219,7 @@ ccf-paper-scout run --config config.json --output recommendations.md
 
 ## GitHub Actions 部署
 
-完整的逐步操作、兴趣文件说明、邮箱设置和可选截图清单见 [无 Zotero 部署指南](docs/deploy-without-zotero.md)。已有 Zotero 用户可以保留原配置；新用户推荐以下路径。
+完整的逐步操作、兴趣文件说明、邮箱设置和页面截图见 [无 Zotero 部署图文指南](docs/deploy-without-zotero.md)。已有 Zotero 用户可以保留原配置；新用户推荐以下路径。
 
 ### 1. Fork 并填写兴趣
 
@@ -266,9 +264,24 @@ Fork 项目，启用 Actions，编辑自己 Fork 中的 `profiles/custom.json` �
 3. 运行一次 `production`，建议首次 `max_results=3`，确认邮件与状态保存成功。
 4. 启用 **Paper Scout Daily**，等待下一次调度。每天上限目前为 5 篇，没有合格论文不会凑数。
 
+下面是预览表单：选择 `preview`，其余模式保持 `configured`，使用自己配置的兴趣和开关。
+
+<img src="images/manual.png" alt="Paper Scout Manual 预览表单：main 分支、preview 模式、最多 5 篇，其余选项 configured" width="460">
+
 Manual 还提供 `discover`（只更新发现库）、`evaluate`（评估已有候选）和 `research`（内置 RL 公开研究实验）。手动模式选择会覆盖仓库 Variables，仅影响该次运行。Fork 不会复制原作者的 Secrets，需自行配置。
 
-Actions 负责批次检索与投递，不托管常驻网页；网页使用本机 `serve`。定时任务使用默认分支代码，功能分支需要先合并才生效。部署升级与恢复步骤见 [main 操作指南](docs/main-rollout.md)。
+Actions 负责批次检索与投递，不托管常驻网页；网页使用本机 `serve`。定时任务使用默认分支代码，功能分支需要先合并才生效。部署升级与恢复步骤见 [Daily 运维与恢复指南](docs/main-rollout.md)。
+
+## 使用指南
+
+| 指南 | 内容 |
+|---|---|
+| [无 Zotero 部署](docs/deploy-without-zotero.md) | 自定义兴趣、状态仓库、邮箱和 Actions 图文步骤 |
+| [Daily 运维与恢复](docs/main-rollout.md) | 更新、来源配置、超时降级和令牌故障 |
+| [网页语义搜索](docs/search-semantic-ranking.md) | 本地模型、标题与摘要匹配、缓存与排序 |
+| [搜索反馈与评测](docs/search-feedback-and-evaluation.md) | 阅读反馈、人工与 AI 协作标注、固定快照评测 |
+| [离线排序评测](docs/offline-benchmark.md) | 采集、摘要补全、盲标与 Daily 语义校准 |
+| [研究画像实验](docs/research-actions.md) | 使用公开数据运行内置 RL 画像对比实验 |
 
 ## 每日发送时间
 
