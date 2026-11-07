@@ -12,6 +12,8 @@ from typing import Any
 
 def load_config(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    from .interests import configure
+    configure(payload, path.resolve().parent)
     from .discovery import resolve_years
     resolve_years(payload)
     if payload.get('sources', {}).get('enabled'):
@@ -46,7 +48,12 @@ def doctor(config_path: Path, network: bool = True) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"config: failed — {exc}")
         return 2
-    for name in ("ZOTERO_USER_ID", "ZOTERO_API_KEY"):
+    source = config.get('interest_source', 'zotero')
+    print(f'interest source: {source}')
+    required = ['ZOTERO_USER_ID', 'ZOTERO_API_KEY'] if source == 'zotero' else []
+    if config.get('llm_translation', {}).get('enabled'):
+        required.append(config['llm_translation'].get('api_key_env', 'LLM_API_KEY'))
+    for name in required:
         value = os.environ.get(name, "")
         print(f"{name}: {'present length=' + str(len(value)) if value else 'missing'}")
         failures += not bool(value)
@@ -66,7 +73,8 @@ def doctor(config_path: Path, network: bool = True) -> int:
                     if smtp.get("use_ssl", True):
                         with ssl.create_default_context().wrap_socket(sock, server_hostname=str(smtp["host"])):
                             pass
-                print("smtp TLS: ok")
+                print("smtp implicit TLS: ok" if smtp.get('use_ssl', True) else
+                      "smtp TCP: ok; STARTTLS is negotiated during delivery")
             except OSError as exc:
                 print(f"smtp TLS: failed — {exc}")
                 failures += 1

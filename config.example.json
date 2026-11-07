@@ -1,4 +1,5 @@
 {
+  "interest_source": "zotero",
   "year_policy": {
     "mode": "rolling",
     "timezone": "Asia/Shanghai",

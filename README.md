@@ -5,11 +5,13 @@ CCF Paper Scout 是一个面向个人研究者的论文搜索与推荐工具，�
 | 使用方式 | 适合的场景 | 排序依据 |
 |---|---|---|
 | 本地网页搜索 | 围绕当前问题主动找论文、阅读与标注 | 本次查询与标题、摘要的相关性；默认语义＋关键词 |
-| Daily 每日邮件 | 根据长期兴趣定期发现论文 | Zotero 兴趣文献、研究方向、主会资格及投递去重；可选语义排序 |
+| Daily 每日邮件 | 根据长期兴趣定期发现论文 | 手动兴趣或 Zotero 文献、主会资格及投递去重；可选语义排序 |
 
-网页搜索不需要 Zotero、SMTP 或 LLM 凭据。Daily 通过 GitHub Actions 和 SMTP 投递，可选调用 OpenAI-compatible API 生成中文论文卡片。两者复用采集与向量编码能力，使用独立的搜索/投递数据库；网页反馈不会自动训练模型或改变 Daily 推荐。
+网页搜索不需要 Zotero、SMTP 或 LLM 凭据。Daily 支持无 Zotero 的手动兴趣模式，通过 GitHub Actions 和 SMTP 投递，可选调用 OpenAI-compatible API 生成中文论文卡片。两者复用采集与向量编码能力，使用独立的搜索/投递数据库；网页反馈不会自动训练模型或改变 Daily 推荐。
 
-Daily 示例配置的默认偏好：
+**首次部署每日邮件且没有 Zotero：从 [无 Zotero 部署指南](docs/deploy-without-zotero.md) 开始。** 只需填写自己的兴趣，先预览，再配置邮箱并开启 Daily。
+
+Daily 基础示例配置的默认偏好（自定义用户请改用 `profiles/custom.json`）：
 
 - 主要方向：强化学习（RL）、多智能体强化学习（MARL）、LLM-assisted RL；
 - 拓展方向：LLM Agent；
@@ -20,11 +22,11 @@ Daily 示例配置的默认偏好：
 ```text
 GitHub Actions
   → 恢复私有状态
-  → 读取 Zotero 兴趣文献
+  → 读取手动兴趣画像，或 Zotero 兴趣文献
   → 按动态年份、独立来源预算和持久游标采集 DBLP／PMLR／OpenAlex
   → 保存完整候选库并周期复查；发现进度不依赖是否已推送
   → CCF-A 白名单与具体 proceedings／官方轨道证据硬过滤（未知暂缓）
-  → 排除已推送论文和 Zotero 已收藏论文
+  → 排除已推送论文；Zotero 模式同时排除已收藏论文
   → 在来源预算内完成官方页面／DOI 精确摘要补全
   → 归一化词项排序，可选 CPU embedding / 相关性复核
   → LLM／RL 作用方向原型与独立证据复核（默认 shadow，正式模式强制准入）
@@ -42,12 +44,12 @@ LLM 不参与 CCF-A 出版资格判断和去重。关系复核与最终中文卡
 
 ## 网页搜索：快速开始
 
-以下命令使用包含网页升级的 `update-paper` 分支。在仓库根目录运行；Windows 推荐 Python 3.12。已有仓库和虚拟环境时，跳过克隆与环境创建步骤。升级安装前先在原服务窗口按 `Ctrl+C` 停止服务，避免 Windows 可执行文件被占用。
+以下命令在已包含网页与手动兴趣功能的版本中使用。在仓库根目录运行；Windows 推荐 Python 3.12。已有仓库和虚拟环境时，跳过克隆与环境创建步骤。升级安装前先在原服务窗口按 `Ctrl+C` 停止服务，避免 Windows 可执行文件被占用。
 
 ### Windows / PowerShell
 
 ```powershell
-git clone --branch update-paper https://github.com/ademjest/ccf-paper-scout.git
+git clone https://github.com/ademjest/ccf-paper-scout.git
 cd ccf-paper-scout
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --no-cache-dir .
@@ -57,7 +59,7 @@ py -3.12 -m venv .venv
 ### Linux / macOS
 
 ```bash
-git clone --branch update-paper https://github.com/ademjest/ccf-paper-scout.git
+git clone https://github.com/ademjest/ccf-paper-scout.git
 cd ccf-paper-scout
 python3 -m venv .venv
 source .venv/bin/activate
@@ -109,17 +111,17 @@ ccf-paper-scout serve --config config.example.json
 
 - Python 3.11+；本地语义匹配推荐 Python 3.12
 - 仅运行网页搜索无需 Zotero、SMTP 或 LLM 凭据
-- 使用 Daily 兴趣推荐时需要 Zotero 数字 User ID 和只读 API Key
+- Daily 可用手动兴趣模式；只有选择 Zotero 模式时才需要数字 User ID 和只读 API Key
 - 使用邮件投递时需要 SMTP 账号
 - 使用中文论文卡片时需要 OpenAI-compatible API
 - 使用 GitHub Actions 正式投递时需要一个私有 GitHub 状态仓库
 
 ## Daily 本地运行
 
-如果已完成网页快速安装，可直接复制配置并设置 Zotero 凭据：
+如果已完成网页快速安装，可直接复制配置：
 
 ```bash
-git clone --branch update-paper https://github.com/ademjest/ccf-paper-scout.git
+git clone https://github.com/ademjest/ccf-paper-scout.git
 cd ccf-paper-scout
 python3 -m venv .venv
 source .venv/bin/activate
@@ -127,7 +129,20 @@ python -m pip install .
 cp config.example.json config.json
 ```
 
-设置 Zotero 凭据：
+不使用 Zotero 时，在复制后的 `config.json` 中设置以下字段，并编辑 `profiles/custom.json`：
+
+```json
+{
+  "interest_source": "manual",
+  "research_profile_file": "profiles/custom.json",
+  "relation_policy": {"enabled": false, "mode": "shadow"},
+  "llm_translation": {"enabled": false}
+}
+```
+
+这是需要修改的配置片段，不是完整配置。兴趣文件可以只含 `explicit_interests` 非空英文关键词数组；省略的检索词、主题优先级和方向描述会从这组关键词生成。参考 [完整兴趣示例](profiles/custom.json)。
+
+使用 Zotero 时保持 `interest_source=zotero`（未填写时的兼容默认值），再设置凭据：
 
 ```bash
 export ZOTERO_USER_ID='你的数字 User ID'
@@ -164,8 +179,10 @@ ccf-paper-scout run \
 - `search.semantic`：网页/手动搜索使用的本地模型缓存位置和增量编码预算；相对模型路径以启动目录为准；
 - `search.state_db`：独立搜索库，默认 `state/search.sqlite3`，不能与 Daily 数据库相同；
 - `main_conference`：主会资格硬过滤、历史候选论文集回填预算；
-- `relation_policy`：LLM→RL、RL→LLM、LLM 多智能体 RL 独立分类与证据复核，默认 shadow；
-- `explicit_interests`：显式主要研究方向；
+- `relation_policy`：LLM→RL、RL→LLM、LLM 多智能体 RL 独立分类与证据复核；非 RL 方向建议关闭；
+- `interest_source`：`manual` 或 `zotero`，决定是否读取 Zotero；
+- `research_profile_file`：可选兴趣 JSON 文件，相对路径以配置文件所在目录为准；
+- `explicit_interests`：显式主要研究方向，手动模式必须非空；
 - `topic_priority.primary_topics`：主要方向；
 - `topic_priority.exploration_topics`：拓展方向；
 - `topic_priority.max_exploration_results`：拓展方向最大篇数；
@@ -204,76 +221,54 @@ ccf-paper-scout run --config config.json --output recommendations.md
 
 ## GitHub Actions 部署
 
-仓库保留两个业务工作流：
+完整的逐步操作、兴趣文件说明、邮箱设置和可选截图清单见 [无 Zotero 部署指南](docs/deploy-without-zotero.md)。已有 Zotero 用户可以保留原配置；新用户推荐以下路径。
 
-- `Paper Scout Manual`：`doctor`、`smtp-test`、`discover`、`evaluate`、`preview`、`production`、`research`；
-- `Paper Scout Daily`：每日自动推荐。
+### 1. Fork 并填写兴趣
 
-另有 `Keep Scheduled Workflows Active`，用于降低公开仓库长时间无提交后 schedule 被暂停的概率。
+Fork 项目，启用 Actions，编辑自己 Fork 中的 `profiles/custom.json` 并提交到默认分支。关键词控制基础匹配，`discovery_queries` 控制联网检索，方向描述用于语义匹配。未填写的可选字段由本文件关键词生成，不沿用作者的 RL 画像。
 
-Actions 负责批次检索与投递，不托管常驻网页。网页通过本机 `serve` 启动；推送 `update-paper` 不会自动替换默认分支上的 Daily 程序，正式部署仍需完成预览并合并到默认分支。
+### 2. 创建私有状态仓库
 
-`research` 可在 `update-paper` 分支运行新的 RL 行动策略／世界模型画像实验：定向检索公开论文、核对官方摘要、比较新旧画像与三种排序，并提供 HTML/JSON 下载。此模式无需 Zotero、SMTP、LLM 或私有状态仓库 Secrets，不发送邮件。操作步骤见 [Actions 研究实验](docs/research-actions.md)。
+创建自己的 Private 仓库（例如 `你的账号/paper-scout-state`），勾选添加 README，确认分支是 **main**。用 Fine-grained token 仅授权这个仓库的 **Contents: Read and write**，把令牌保存为代码仓库 Secret `STATE_REPO_TOKEN`。
 
-将当前分支接入正式每日推送的配置、预览、合并与历史保留步骤见 [main 升级操作指南](docs/main-rollout.md)。
+状态仓库保存候选缓存、投递历史和私有预览报告。不要共享作者或其他用户的状态库；无需手动创建 SQLite。注意令牌有效期，过期后需要更新 Secret。
 
-### 1. 创建私有状态仓库
+### 3. 添加 Variables 与 Secrets
 
-创建一个 private 仓库，例如：
+在**代码仓库** Settings → Secrets and variables → Actions 配置：
 
-```text
-你的账号/ccf-paper-scout-state
-```
+| Variables | 无 Zotero 新用户建议值 |
+|---|---|
+| `STATE_REPO` | `你的账号/paper-scout-state` |
+| `INTEREST_SOURCE` | `manual` |
+| `RESEARCH_PROFILE` | `custom` |
+| `SEMANTIC_MODE` | `off` |
+| `RELATION_MODE` | `off`（LLM/RL 专用策略，其他方向应关闭） |
+| `LLM_ENABLED` | `false` |
 
-私有状态仓库用于保存：
+预览仅需 `STATE_REPO_TOKEN`。准备投递时再添加 Secrets `SMTP_SENDER`、`SMTP_RECEIVER`、`SMTP_PASSWORD`，分别为发件地址、收件地址、SMTP 授权码/应用密码。
 
-```text
-state/paper_scout.sqlite3
-state/seen.json
-state/translations.json
-```
+邮箱服务器通过 Variables `SMTP_HOST`、`SMTP_PORT`、`SMTP_USE_SSL` 设置。未设置时兼容原 QQ 邮箱组合 `smtp.qq.com / 465 / true`；其他邮箱按服务商文档填写。`SMTP_USE_SSL=false` 表示 STARTTLS（通常 587），不是明文发送。
 
-不要将状态仓库设为公开，因为推荐历史和缓存可能反映个人研究兴趣。
+可选配置：
 
-### 2. 配置 GitHub Variable
+- Zotero：`INTEREST_SOURCE=zotero`，添加 Secrets `ZOTERO_USER_ID`、`ZOTERO_API_KEY`。
+- 中文卡片：`LLM_ENABLED=true`，添加 Secrets `LLM_BASE_URL`、`LLM_MODEL`、`LLM_API_KEY`。未设置开关但已有前两个字段时兼容旧部署，仍默认启用；明确设为 false 可关闭所有推荐流程中的 LLM 网络调用。
+- 语义比较：`SEMANTIC_MODE=shadow`；production 仍需审核校准，不能直接将网页混合排序的设置当作 Daily 校准。
+- OpenAlex 凭据：如接口要求，配置 Secret `OPENALEX_API_KEY`；可按来源需求补充其他服务凭据。
 
-在代码仓库的 `Settings → Secrets and variables → Actions → Variables` 中设置：
+### 4. 预览、验证投递、启用 Daily
 
-```text
-STATE_REPO=你的账号/ccf-paper-scout-state
-```
+在 **Paper Scout Manual → Run workflow** 选择默认分支：
 
-### 3. 配置 GitHub Secrets
+1. `mode=preview`，其余模式选项保留 `configured`，表示沿用上述 Variables。无需邮箱或 Zotero，结果保存到私有状态仓库 `reports/<run-id>/`，不发邮件、不更新投递历史。
+2. 添加邮箱配置后运行 `doctor`，再运行 `smtp-test` 验证实际收件。
+3. 运行一次 `production`，建议首次 `max_results=3`，确认邮件与状态保存成功。
+4. 启用 **Paper Scout Daily**，等待下一次调度。每天上限目前为 5 篇，没有合格论文不会凑数。
 
-```text
-ZOTERO_USER_ID
-ZOTERO_API_KEY
-SMTP_SENDER
-SMTP_RECEIVER
-SMTP_PASSWORD
-LLM_API_KEY
-LLM_BASE_URL
-LLM_MODEL
-STATE_REPO_TOKEN
-```
+Manual 还提供 `discover`（只更新发现库）、`evaluate`（评估已有候选）和 `research`（内置 RL 公开研究实验）。手动模式选择会覆盖仓库 Variables，仅影响该次运行。Fork 不会复制原作者的 Secrets，需自行配置。
 
-说明：
-
-- `SMTP_PASSWORD` 应为 SMTP 授权码，不是邮箱登录密码；
-- QQ 邮箱默认使用 `smtp.qq.com:465` 和 SSL；
-- `STATE_REPO_TOKEN` 建议使用只授权私有状态仓库、Contents read/write 的 fine-grained token；
-- 所有 Secret 都不得出现在 Issue、PR、日志或配置文件中。
-
-### 4. 按顺序验收
-
-在 `Paper Scout Manual` 中依次运行：
-
-1. `doctor`：检查配置、凭据存在性、SMTP TLS 和状态目录；
-2. `smtp-test`：只发送测试邮件，不抓取论文、不修改推荐状态；
-3. `preview`：恢复私有状态并生成报告，不发送邮件、不更新去重状态；
-4. `production`：首次建议使用较小的 `max_results`，确认真实邮件和状态持久化都成功。
-
-成功后再启用 `Paper Scout Daily`，并停用其他生产调度器，避免重复发送。
+Actions 负责批次检索与投递，不托管常驻网页；网页使用本机 `serve`。定时任务使用默认分支代码，功能分支需要先合并才生效。部署升级与恢复步骤见 [main 操作指南](docs/main-rollout.md)。
 
 ## 每日发送时间
 
