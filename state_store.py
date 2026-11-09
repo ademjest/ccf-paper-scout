@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS delivery_attempts(
   attempt_id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES recommendation_runs(run_id) ON DELETE CASCADE,
   channel TEXT NOT NULL, status TEXT NOT NULL, provider_message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS delivery_receipts(
+  run_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS translation_cache(
   cache_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -313,7 +316,25 @@ class StateStore:
         rows = self.connection.execute(
             "SELECT DISTINCT paper_id FROM recommendation_items WHERE state='delivered'"
         )
-        return {row[0] for row in rows}
+        result = {row[0] for row in rows}
+        for row in self.connection.execute('SELECT payload_json FROM delivery_receipts'):
+            result.update(json.loads(row[0])['selected_paper_ids'])
+        return result
+
+    def reconcile_receipts(self, receipts) -> None:
+        from ccf_paper_scout.delivery_receipts import validate
+        with self.connection:
+            for receipt in receipts:
+                validate(receipt)
+                previous = self.connection.execute('SELECT payload_json FROM delivery_receipts WHERE run_id=?',
+                                                   (receipt['run_id'],)).fetchone()
+                if previous and json.loads(previous[0]) != receipt:
+                    raise ValueError('conflicting persisted delivery receipt')
+                for identifier in receipt['selected_paper_ids']:
+                    self._ensure_identity(dict(id=identifier))
+                    self._save_aliases(identifier, receipt.get('paper_aliases', {}).get(identifier, []))
+                self.connection.execute('INSERT OR IGNORE INTO delivery_receipts VALUES (?,?)',
+                                        (receipt['run_id'], json.dumps(receipt, sort_keys=True)))
 
     def save_translation(self, key: str, fingerprint: str, payload: dict[str, Any]) -> None:
         self.connection.execute(

@@ -55,6 +55,18 @@ Actions 中按来源需要添加凭据：`OPENALEX_API_KEY`、`SEMANTIC_SCHOLAR_
 
 ## 私有状态仓库恢复失败
 
+### 数据库存储与投递回执
+
+Actions 将 SQLite 一致快照压缩为 `state/paper_scout.sqlite3.gz`，同时保存 `snapshot.json` 的大小和 SHA-256 校验信息。运行时先解压、检查完整性，再读取数据库。首次保存会自动将旧 `.sqlite3` 从当前版本的 Git 跟踪中移除，历史提交保留；不要手动删除历史数据库或重写仓库。
+
+`state/delivery-receipts.jsonl` 保存 SMTP 接受的论文 ID 和证据。结束时先独立推送回执与去重记录，再推送压缩数据库；大文件保存失败时，下次仍能将回执合并到旧快照的去重信息中。SMTP 接受不代表邮件已经入箱或被阅读。结果不确定时继续保留 pending，不能自动重发。
+
+Manual 的 `state-check` 模式会检查恢复和压缩往返，只输出汇总，不发邮件、不调用论文或 LLM 接口、不推送生产状态。它需要私有状态仓库凭据，不能代替 SMTP 测试。压缩文件达到 50 MiB 会告警，达到 90 MiB 则停止上传；发送前也会检查快照容量。
+
+如果回执已保存而数据库保存失败，可新运行 `state-check` 检查恢复；正式运行会依据回执排除已投递论文。如果 SMTP 结果不明、回执与 pending 不匹配或压缩存档损坏，应先查日志及私有状态，不删除 marker 来强行继续。压缩格式上线后，回退到不支持压缩的旧代码需要先准备兼容的恢复路径。
+
+### 认证或克隆失败
+
 如果 `Restore private state` 的克隆步骤失败，并出现 `could not read Username for 'https://github.com'`，说明 Git 无法完成认证。先检查这一步，而不是最后的状态保存步骤。旧工作流在恢复失败后仍执行 `always()` 保存，会额外报 `.runtime-state: No such file or directory`；修复后只有恢复和核验全部成功才允许保存。恢复成功而后续推荐/投递失败时仍尝试保存已有状态。
 
 按以下步骤处理认证问题：

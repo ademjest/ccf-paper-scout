@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         default: doctor
-        options: [doctor, smtp-test, discover, evaluate, preview, production, research]
+        options: [doctor, smtp-test, state-check, discover, evaluate, preview, production, research]
       semantic_mode:
         description: Embedding mode; configured uses repository variables
         type: choice
@@ -98,7 +98,7 @@ jobs:
           python -c 'import paper_scout; print(paper_scout.__file__)'
       - name: Restore private state
         id: restore_state
-        if: inputs.mode == 'preview' || inputs.mode == 'production' || inputs.mode == 'discover' || inputs.mode == 'evaluate'
+        if: inputs.mode == 'preview' || inputs.mode == 'production' || inputs.mode == 'discover' || inputs.mode == 'evaluate' || inputs.mode == 'state-check'
         env:
           STATE_REPO: ${{ vars.STATE_REPO }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
@@ -108,17 +108,18 @@ jobs:
             exit 2
           fi
           basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
-          if ! GIT_TERMINAL_PROMPT=0 git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" clone "https://github.com/${STATE_REPO}.git" .runtime-state; then
+          if ! GIT_TERMINAL_PROMPT=0 git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" clone --depth 1 --branch main "https://github.com/${STATE_REPO}.git" .runtime-state; then
             echo "::error::Private state clone failed. Check the STATE_REPO path, STATE_REPO_TOKEN expiry and repository Contents read/write access, and the Git error above. Delivery will not run without restored history."
             exit 1
           fi
           git -C .runtime-state remote set-url origin "https://github.com/${STATE_REPO}.git"
-          python scripts/actions_state.py prepare --dir .runtime-state/state
+          python scripts/actions_state.py restore --dir .runtime-state/state
           python scripts/actions_state.py verify --dir .runtime-state/state
       - name: Prepare stateless directory
         if: inputs.mode == 'doctor' || inputs.mode == 'smtp-test'
         run: mkdir -p .runtime-state/state
       - name: Build ephemeral config
+        if: inputs.mode != 'state-check'
         env:
           REQUESTED_MAX_RESULTS: ${{ inputs.max_results }}
           REQUESTED_MODE: ${{ inputs.mode }}
@@ -140,6 +141,11 @@ jobs:
           EXTRA=""
           case "$REQUESTED_MODE" in preview|evaluate|discover) EXTRA="--disable-smtp";; esac
           python scripts/build_actions_config.py --base config.example.json --output config.action.json --state-dir .runtime-state/state --max-results "$REQUESTED_MAX_RESULTS" $EXTRA
+      - name: Check state snapshot without delivery
+        if: inputs.mode == 'state-check'
+        run: |
+          python scripts/actions_state.py pack --dir .runtime-state/state --check-only
+          python scripts/actions_state.py stats --dir .runtime-state/state >> "$GITHUB_STEP_SUMMARY"
       - name: Doctor
         if: inputs.mode == 'doctor'
         env:
@@ -195,35 +201,15 @@ jobs:
           CROSSREF_MAILTO: ${{ vars.CROSSREF_MAILTO }}
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
           PAPER_SCOUT_DELIVERY_GATE: .runtime-state/state/.delivery-approved
-        run: |
-          ccf-paper-scout run --config config.action.json --output recommendations.md & scout_pid=$!
-          while [ ! -f .runtime-state/state/.delivery-pending ] && kill -0 "$scout_pid" 2>/dev/null; do sleep 1; done
-          if [ -f .runtime-state/state/.delivery-pending ]; then
-            git -C .runtime-state config user.name "github-actions[bot]"
-            git -C .runtime-state config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git -C .runtime-state add state/.delivery-pending
-            git -C .runtime-state commit -m "state: pending delivery ${GITHUB_RUN_ID}"
-            basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
-            git -C .runtime-state -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
-            touch .runtime-state/state/.delivery-approved
-          fi
-          wait "$scout_pid"
+        run: bash scripts/actions_delivery.sh
       - name: Persist production state
         if: always() && steps.restore_state.outcome == 'success' && (inputs.mode == 'production' || inputs.mode == 'discover')
         env:
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         working-directory: .runtime-state
         run: |
-          python ../scripts/actions_state.py checkpoint --dir state
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state
-          if ! git diff --cached --quiet; then
-            git commit -m "state: paper scout run ${GITHUB_RUN_ID}"
-            basic=$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 -w0)
-            git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic" push origin HEAD:main
-          fi
+          python ../scripts/actions_state.py persist --dir state
+          python ../scripts/actions_state.py stats --dir state >> "$GITHUB_STEP_SUMMARY"
       - name: Save private preview and evaluation reports
         if: (inputs.mode == 'preview' || inputs.mode == 'evaluate') && success()
         env:
