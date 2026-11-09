@@ -240,7 +240,7 @@ def persist_pending(root: Path) -> None:
     commit_state(root, ['.delivery-pending'], 'state: pending delivery ' + os.environ.get('GITHUB_RUN_ID', 'local'))
 
 
-def stats(root: Path) -> dict:
+def stats(root: Path, config: dict | None = None) -> dict:
     result = {'files': {p.name: p.stat().st_size for p in root.iterdir() if p.is_file() and p.name in ALLOWED}}
     if (root / DB_NAME).exists():
         con = sqlite3.connect((root / DB_NAME).resolve().as_uri() + '?mode=ro', uri=True)
@@ -248,6 +248,41 @@ def stats(root: Path) -> dict:
             result['rows'] = {name: con.execute('SELECT count(*) FROM "' + name.replace('"', '""') + '"').fetchone()[0]
                               for (name,) in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             result['free_bytes'] = con.execute('PRAGMA freelist_count').fetchone()[0] * con.execute('PRAGMA page_size').fetchone()[0]
+            try:
+                result['allocated_bytes'] = dict(con.execute('SELECT name,sum(pgsize) FROM dbstat GROUP BY name'))
+                result['size_method'] = 'SQLite pages including indexes'
+            except sqlite3.OperationalError:
+                result['field_bytes'] = {}
+                result['size_method'] = 'field bytes only; excludes indexes and page overhead'
+                for name in result['rows']:
+                    quoted = '"' + name.replace('"', '""') + '"'
+                    columns = [r[1] for r in con.execute('PRAGMA table_info(' + quoted + ')')]
+                    expression = '+'.join('coalesce(length(cast("' + c.replace('"', '""') + '" as blob)),0)' for c in columns)
+                    result['field_bytes'][name] = con.execute('SELECT coalesce(sum(' + expression + '),0) FROM ' + quoted).fetchone()[0]
+            if 'candidate_papers' in result['rows']:
+                from ccf_paper_scout import official_abstracts
+                from ccf_paper_scout.discovery import resolve_years
+                active_years = resolve_years(config) if config is not None else []
+                counts = dict(total=0, nonempty_abstracts=0, valid_abstracts=0, active=0,
+                              active_valid_abstracts=0, active_stored_verified=0)
+                for venue, year, raw in con.execute('SELECT venue_key,year,payload_json FROM candidate_papers'):
+                    paper = json.loads(raw)
+                    valid = bool(official_abstracts.usable_abstract(paper.get('abstract', '')))
+                    counts['total'] += 1
+                    counts['nonempty_abstracts'] += bool(paper.get('abstract'))
+                    counts['valid_abstracts'] += valid
+                    if config is not None and venue in config['venue_keys'] and year in active_years:
+                        counts['active'] += 1
+                        counts['active_valid_abstracts'] += valid
+                        counts['active_stored_verified'] += paper.get('main_conference_status') == 'verified'
+                result['candidates'] = counts
+                result['active_scope_configured'] = config is not None
+                result['active_years'] = active_years
+                result['qualification_note'] = 'stored qualification, not a new eligibility audit'
+            if 'source_http_cache' in result['rows']:
+                result['http_cache_payload_bytes'] = dict(con.execute('SELECT source,sum(size_bytes) FROM source_http_cache GROUP BY source'))
+            if 'paper_embeddings' in result['rows']:
+                result['vectors_by_signature'] = dict(con.execute('SELECT model_signature,count(*) FROM paper_embeddings GROUP BY model_signature'))
         finally:
             con.close()
     print(json.dumps(result, sort_keys=True))
@@ -291,6 +326,7 @@ def main() -> int:
     parser.add_argument("--run-id")
     parser.add_argument("--reason")
     parser.add_argument('--check-only', action='store_true')
+    parser.add_argument('--config', type=Path, help='optional config for active venue/year statistics')
     args = parser.parse_args()
     command = args.command.replace("-", "_")
     if command == "delivery_status":
@@ -304,6 +340,12 @@ def main() -> int:
         pack(args.dir, check_only=args.check_only)
     elif command == 'reconcile_delivery':
         reconcile(args.dir)
+    elif command == 'stats':
+        if args.config:
+            from ccf_paper_scout.cli import load_config
+            stats(args.dir, load_config(args.config))
+        else:
+            stats(args.dir)
     else:
         globals()[command](args.dir)
     print(f"Actions state {args.command} completed")

@@ -1301,7 +1301,8 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
     multi_source = bool(config.get('sources', {}).get('enabled'))
     try:
         if multi_source and not args.evaluate_only:
-            source_stats = sources.discover(store, config, [venue_by_key[key] for key in requested], years, run_id)
+            source_stats = sources.discover(store, config, [venue_by_key[key] for key in requested], years, run_id,
+                                           require_main=bool(config.get('main_conference', {}).get('enabled', True)))
             failed_sources = []
         else:
             source_stats, failed_sources = ({"mode": "snapshot"}, []) if args.evaluate_only else discovery.discover(

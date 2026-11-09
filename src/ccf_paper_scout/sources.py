@@ -6,7 +6,6 @@ import copy
 import json
 import math
 import os
-import re
 from pathlib import Path
 import subprocess
 import sys
@@ -15,7 +14,7 @@ import time
 from urllib.parse import urlsplit
 
 from .source_adapters import HOSTS, OFFICIAL, key, accumulate_diagnostics
-from . import identity, official_abstracts
+from . import identity, official_abstracts, metadata, proceedings
 
 DEFAULTS = {
     'dblp': dict(max_requests=24, deadline_seconds=180, min_interval_seconds=3, read_timeout_seconds=30),
@@ -95,7 +94,7 @@ def consume_pages(store, source, state):
         print(f'source={source} page={len(state["pages"])} stored={state["records"]}', flush=True)
 
 
-def discover(store, config, venues, years, run_id, *, cancel=None, progress=None):
+def discover(store, config, venues, years, run_id, *, cancel=None, progress=None, require_main=False):
     settings = config['sources']
     validate(settings)
     if settings.get('mode', 'shadow') == 'shadow':
@@ -106,7 +105,7 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
                 store.connection.backup(shadow.connection)
                 isolated = copy.deepcopy(config)
                 isolated['sources']['mode'] = 'production'
-                result = discover(shadow, isolated, venues, years, run_id, cancel=cancel, progress=progress)
+                result = discover(shadow, isolated, venues, years, run_id, cancel=cancel, progress=progress, require_main=require_main)
                 result['shadow'] = True
                 return result
             finally:
@@ -119,11 +118,13 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
     queries = [q for q in queries if isinstance(q, str) and q.strip()]
     if not queries:
         raise ValueError('multi-source discovery requires research queries')
-    tokens = set(re.findall(r'\w+', ' '.join(queries).lower()))
     delivered = store.delivered_ids()
     missing = [p for p in store.search_candidates(limit=100000) if not official_abstracts.usable_abstract(p.get('abstract', ''))
                and p.get('year') in years and p['id'] not in delivered]
-    missing.sort(key=lambda p: -len(tokens & set(re.findall(r'\w+', p.get('title', '').lower()))))
+    if require_main:
+        catalog = proceedings.registry()
+        venue_keys = {v['dblp_key'] for v in venues}
+        missing = [p for p in missing if p.get('venue_key') in venue_keys and proceedings.qualify(dict(p), catalog) == 'verified']
     lookup_budget = max(0, int(config.get('metadata', {}).get('max_requests_per_run', 200)))
     with tempfile.TemporaryDirectory(prefix='scout-sources-') as temporary:
         root = Path(temporary)
@@ -152,14 +153,15 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
                     provider = provider_settings(settings, source)
                     lookups = []
                     for paper in missing:
-                        if len(lookups) >= min(8, provider['max_requests']//4, lookup_budget):
-                            break
                         target = official_abstracts.official_url(paper) if source in OFFICIAL else None
                         if (target and urlsplit(target).hostname in HOSTS[source]) or (
                             source in ('openalex', 'crossref') and (identity.doi(paper.get('doi')) or identity.doi(paper.get('ee')))):
                             previous = states.get(key(source, ['lookup', paper['id']]), {})
                             if previous.get('retry_at', '') <= current.isoformat():
                                 lookups.append(paper)
+                    lookups = metadata.prioritize_abstracts(lookups, queries,
+                        min(8, provider['max_requests']//4, lookup_budget),
+                        float(config.get('metadata', {}).get('exploration_fraction', 0.2)))
                     lookup_budget -= len(lookups)
                     task = dict(source=source, settings=provider, states=states, queries=queries,
                                 venue_keys=[v['dblp_key'] for v in venues], venues=venues, years=years, lookups=lookups,
@@ -179,6 +181,7 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
                     finally:
                         log.close()
                     active[source] = dict(process=process, directory=directory, pages=set(), records=0,
+                                          lookup_candidates=len(lookups),
                                           deadline=min(deadline, time.monotonic() + provider['deadline_seconds']))
                     print(f'source={source} started budget={provider["max_requests"]} deadline={provider["deadline_seconds"]}s', flush=True)
                 cancelled = cancel is not None and cancel.is_set()
@@ -199,6 +202,7 @@ def discover(store, config, venues, years, run_id, *, cancel=None, progress=None
                     if state['process'].returncode and not timed_out:
                         result.update(status='protocol_error', code='worker_failed')
                     result['stored'] = state['records']
+                    result['lookup_candidates'] = state['lookup_candidates']
                     result.update({name: state.get(name, 0) for name in ('new_records', 'abstracts_completed')})
                     for name in ('discovered', 'failures', 'deferred', 'deferred_reasons', 'next_entry_retry_at'):
                         if name in state:
