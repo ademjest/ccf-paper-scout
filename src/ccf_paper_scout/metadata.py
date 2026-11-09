@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import collections
+import hashlib
 import time
 import urllib.parse
 from typing import Any, Callable
@@ -9,6 +11,41 @@ from typing import Any, Callable
 from . import official_abstracts
 
 SOURCE_VERSION = "official-fallback-v1"
+
+
+def prioritize_abstracts(papers, queries, limit, exploration_fraction=0.2):
+    """Bounded, deterministic title ranking with venue balance and exploration."""
+    from paper_scout import rank_candidates
+    if not 0 <= exploration_fraction <= 1:
+        raise ValueError('metadata.exploration_fraction must be between 0 and 1')
+    if not papers or limit <= 0:
+        return []
+    limit = min(limit, len(papers))
+    originals = {p['id']: p for p in papers}
+    ranked = rank_candidates([], [dict(p) for p in sorted(papers, key=lambda p: p['id'])], queries)
+    exploration_count = int(limit * exploration_fraction)
+
+    def balanced(items, count):
+        groups = collections.defaultdict(collections.deque)
+        for paper in items:
+            groups[(paper.get('venue_key', ''), paper.get('year', 0))].append(paper)
+        result = []
+        while groups and len(result) < count:
+            for group in list(groups):
+                result.append(groups[group].popleft())
+                if not groups[group]:
+                    del groups[group]
+                if len(result) == count:
+                    break
+        return result
+
+    selected = balanced(ranked, limit - exploration_count)
+    ids = {p['id'] for p in selected}
+    seed = '\n'.join(queries)
+    remaining = sorted((p for p in papers if p['id'] not in ids),
+                       key=lambda p: hashlib.sha256((seed + '\n' + p['id']).encode()).digest())
+    selected.extend(balanced(remaining, exploration_count))
+    return [originals[p['id']] for p in selected]
 
 
 def enrich(papers: list[dict[str, Any]], store: Any, config: dict[str, Any], user_agent: str,

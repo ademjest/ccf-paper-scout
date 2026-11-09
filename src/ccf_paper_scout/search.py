@@ -187,7 +187,7 @@ def run(config, path, query, *, enabled=None, years=None, scope='published', lim
                 if update:
                     update(result)
             result['discovery'] = sources.discover(store, configured, venues, configured['years'],
-                identifier, cancel=cancel, progress=progress)
+                identifier, cancel=cancel, progress=progress, require_main=scope == 'verified_main')
             result['results'] = cached_results(store, query, configured['years'], scope, limit, counts=counts, require_abstract=require_abstract)
         if ranking != 'lexical' and not (cancel and cancel.is_set()):
             result['state'] = 'ranking'

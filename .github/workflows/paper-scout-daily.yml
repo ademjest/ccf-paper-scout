@@ -102,5 +102,7 @@ jobs:
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         working-directory: .runtime-state
         run: |
-          python ../scripts/actions_state.py persist --dir state
-          python ../scripts/actions_state.py stats --dir state >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          python ../scripts/actions_state.py persist --dir state || status=$?
+          python ../scripts/actions_state.py stats --dir state --config ../config.action.json >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
