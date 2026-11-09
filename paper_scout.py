@@ -1062,6 +1062,7 @@ def write_delivery_marker(
     path: Path, run_id: str, phase: str, selected: list[dict[str, Any]], report: str,
     receiver: str = "",  # accepted only to make accidental persistence testable
 ) -> None:
+    from ccf_paper_scout.identity import aliases
     payload = {
         "version": 1,
         "run_id": run_id,
@@ -1069,6 +1070,8 @@ def write_delivery_marker(
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "report_sha256": hashlib.sha256(report.encode("utf-8")).hexdigest(),
         "selected_paper_ids": [str(paper["id"]) for paper in selected],
+        "actions_run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        "paper_aliases": {str(paper['id']): [list(pair) for pair in sorted(aliases(paper))] for paper in selected},
     }
     atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
@@ -1265,6 +1268,8 @@ def run_pipeline(args: argparse.Namespace, config: dict[str, Any]) -> int:
     if not state_path.is_absolute():
         state_path = args.config.resolve().parent / state_path
     store = state_store.StateStore(state_path)
+    from ccf_paper_scout import delivery_receipts
+    store.reconcile_receipts(delivery_receipts.load(state_path.parent).values())
     cache_path = Path(config.get("llm_translation", {}).get("cache", "state/translations.json"))
     if not cache_path.is_absolute():
         cache_path = args.config.resolve().parent / cache_path
@@ -1447,8 +1452,13 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
         except Exception as exc:
             store.finish_delivery(run_id, False, str(exc))
             raise
-        advance_delivery_marker(delivery_marker, "smtp_accepted")
-        print("      SMTP delivery accepted")
+        if delivered:
+            advance_delivery_marker(delivery_marker, "smtp_accepted")
+            print("      SMTP delivery accepted")
+            from ccf_paper_scout import delivery_receipts
+            receipt = delivery_receipts.from_marker(load_json(delivery_marker))
+            delivery_receipts.record(delivery_marker.parent, receipt)
+            store.reconcile_receipts([receipt])
     if args.no_update_seen:
         store.finish_run(run_id, "preview")
     elif not selected:
@@ -1467,7 +1477,7 @@ def run_pipeline_body(args, config, user_agent, interests, zotero_identity_paper
         except OSError as exc:
             print(f"warning: SQLite delivery state committed but legacy seen.json mirror failed: {exc}", file=sys.stderr)
         print(f"      Updated dedup history: {len(seen)} paper IDs")
-        if delivery_enabled:
+        if delivery_enabled and not os.environ.get("PAPER_SCOUT_DELIVERY_GATE"):
             clear_delivery_marker(delivery_marker)
     elif args.no_update_seen:
         print("      Dedup history not updated because --no-update-seen was supplied")

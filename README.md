@@ -303,10 +303,13 @@ GitHub-hosted schedule 是 best-effort，提前调度只是根据历史延迟进
 → 调用 SMTP
 → SMTP accepted
 → 更新 SQLite 和 seen.json
-→ 清除 pending 并推送最终状态
+→ 独立推送回执、去重记录与 pending 清除
+→ 压缩数据库并单独推送快照
 ```
 
 如果系统无法确认邮件是否已发送，会保留 pending 并阻止下一次自动 production，以减少重复邮件风险。
+
+私有状态仓库保存 `paper_scout.sqlite3.gz` 和校验清单，Actions 运行时自动解压。小体积投递回执优先独立保存；即使大数据库上传失败，下次仍能恢复已投递 ID。Manual 的 `state-check` 可检查状态恢复和压缩完整性，不发送邮件。详见 [Daily 运维与恢复指南](docs/main-rollout.md)。
 
 ## 隐私边界
 

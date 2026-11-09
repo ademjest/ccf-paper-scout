@@ -44,7 +44,7 @@ class StatePersistenceTests(unittest.TestCase):
                                                     'success', mode, success))
 
     def test_manual_read_only_and_stateless_modes_do_not_persist_production_state(self):
-        for mode in ('preview', 'evaluate', 'doctor', 'smtp-test', 'research'):
+        for mode in ('preview', 'evaluate', 'doctor', 'smtp-test', 'research', 'state-check'):
             with self.subTest(mode=mode):
                 self.assertFalse(self.should_persist('paper-scout-manual.yml', 'Persist production state',
                                                      'success', mode, True))
